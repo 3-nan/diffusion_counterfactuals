@@ -29,6 +29,7 @@ MANIFEST
 
 ldce/
 models/
+ca-certificates/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

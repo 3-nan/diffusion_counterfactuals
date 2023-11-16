@@ -1,3 +1,24 @@
+clip-anytorch==2.5.2
+einops==0.3.0
+gitpython==3.1.31
 hydra-core==1.3.2
+huggingface-hub==0.16.4
+kornia==0.6.0
 omegaconf==2.3.0
+pandas==1.5.3
+pytorch-fid==0.3.0
+pytorch-lightning==1.4.2
 regex==2023.3.23
+setuptools==66.0.0
+timm==0.6.13
+torch-fidelity==0.3.0
+torchdiffeq==0.2.3
+torchmetrics==0.6.0
+torchsde==0.2.5
+tornado==6.2
+tqdm==4.65.0
+transformers==4.31.0
+git+https://github.com/pytorch/text.git@v0.10.0
+# git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
+werkzeug==2.3.7
+wheel==0.38.4
