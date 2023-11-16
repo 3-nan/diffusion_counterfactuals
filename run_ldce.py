@@ -8,13 +8,16 @@ import random
 # import matplotlib.pyplot as plt
 import numpy as np
 import pathlib
+import sys
+sys.path.append("./")
+sys.path.append("./ldce")
 
 
 import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 # torch.backends.cudnn.benchmark = True
 # from contextlib import nullcontext
-# from torch import autocast
+from torch import autocast
 
 from omegaconf import OmegaConf, open_dict
 import hydra
@@ -30,6 +33,7 @@ from torchvision.utils import save_image
 #     from segment_anything import build_sam, SamPredictor
 # except:
 #     print("segment_anything not installed")
+# from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
 from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
 # from ldce.sampling_helpers import load_model_hf
 # import json
@@ -172,7 +176,7 @@ def get_dataset(cfg, last_data_idx: int = 0):
         raise NotImplementedError
     return dataset
 
-@hydra.main(version_base=None, config_path="../configs/ldce", config_name="v1")
+@hydra.main(version_base=None, config_path="configs/ldce", config_name="v1")
 def main(cfg : DictConfig) -> None:
     if "verbose" not in cfg:
         with open_dict(cfg):
@@ -233,6 +237,7 @@ def main(cfg : DictConfig) -> None:
     #         model_seg = SamPredictor(build_sam(checkpoint=sam_checkpoint).to(device))
 
     model = get_model(cfg_path=cfg.diffusion_model.cfg_path, ckpt_path = cfg.diffusion_model.ckpt_path).to(device).eval()
+    print("Model successfully loaded.")
     
     classifier_model = get_classifier(cfg, device)
     classifier_model.to(device).eval()
@@ -422,6 +427,7 @@ def main(cfg : DictConfig) -> None:
             prompts=prompts, 
             seed=seed,
         )
+        print("Samples generated successfully.")
 
         all_samples = out["samples"]
         all_videos = out["videos"] 

@@ -1,4 +1,5 @@
-From pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+# From pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+From pytorch/pytorch:1.11.0-cuda11.3-cudnn8-runtime
 
 RUN apt-get update
 
@@ -7,12 +8,39 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN pip3 install --upgrade pip
 
 RUN apt install -y git
+RUN apt-get -y install cmake
+RUN apt install build-essential -y
 
+COPY requirements.txt ./requirements.txt
 RUN pip3 install -r requirements.txt
 
+RUN git clone https://github.com/CompVis/taming-transformers.git
+ENV PYTHONPATH "${PYTHONPATH}:./taming-transformers"
+
+RUN pip3 install -e git+https://github.com/openai/CLIP.git@main#egg=clip
+
+RUN pip3 install git+https://github.com/lmb-freiburg/ldce.git
 RUN git clone https://github.com/lmb-freiburg/ldce.git
+# RUN pip3 install ./ldce/ldm
+RUN pip3 install certifi
+COPY ca-certificates /usr/local/share/ca-certificates
+RUN apt-get install --yes --no-install-recommends software-properties-common ca-certificates
+# RUN chmod 644 /usr/local/share/ca-certificates/continental.crt
+# RUN chmod 644 /usr/local/share/ca-certificates/conti-corp-it-security.crt
+RUN update-ca-certificates
+
+# ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_DIR=/etc/ssl/certs
+
+ENV HYDRA_FULL_ERROR=1
 
 COPY configs/ ./configs
-COPY run_ldce.py .run_ldce.py
+COPY data/ ./data
+COPY models/ ./models
+COPY run_ldce.py ./run_ldce.py
+# COPY convert_imagenet.py ./convert_imagenet.py
+COPY test_stuff.py ./test_stuff.py
 
-RUN ["python", "-m run_ldce --config-name=v1_wider data.batch_size=5 strength=0.382 data.start_sample=$id data.end_sample=$((id+1)) > logs/imagenet_sd_${id}.log"]
+CMD ["python", "run_ldce.py", "--config-name=v1_wider"]
+# CMD ["python", "convert_imagenet.py"]
+# CMD ["python", "test_stuff.py"]
