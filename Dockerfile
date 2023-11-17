@@ -37,6 +37,7 @@ ENV HYDRA_FULL_ERROR=1
 COPY configs/ ./configs
 COPY data/ ./data
 COPY models/ ./models
+COPY src/ ./src
 COPY run_ldce.py ./run_ldce.py
 # COPY convert_imagenet.py ./convert_imagenet.py
 COPY test_stuff.py ./test_stuff.py

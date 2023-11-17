@@ -77,6 +77,9 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     lp_dist = self.distance_criterion(pred_x0_0to1, self.init_images.to(x.device))
                     lp_grad = torch.autograd.grad(lp_dist.mean(), x_noise, retain_graph=True)[0]
 
+                    print(f"Init_images: {self.init_images.size()}")
+                    print(f"lp_grad: {lp_grad.size()}, lp_dist: {lp_dist}, pred_x0_0to1: {pred_x0_0to1.size()}")
+
             #########################################
             # Get classifier prediction & gradients
             #########################################
@@ -92,6 +95,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     #     else:
                     #         e_t_uncond, e_t, pred_x0 = ret_vals
                     pred_logits = self.get_classifier_logits(pred_x0)
+                    print(f"classifier logits: {pred_logits.size()} for pred_x0: {pred_x0.size()}")
                     if len(pred_logits.shape) == 2: # multi-class
                         log_probs = torch.nn.functional.log_softmax(pred_logits, dim=-1)
                         log_probs = log_probs[range(log_probs.size(0)), y.view(-1)]
@@ -109,6 +113,9 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     # else:
                     grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
                         # grad_classifier2 = torch.autograd.grad(log_probs[0].sum(), x_noise, retain_graph=False)[0]
+
+                    print(f"Log probs shape: {log_probs.size()}, x_noise: {x_noise.size()}")
+                    print(f"Grad classifier shape: {grad_classifier.size()}")
 
                     if self.log_backprop_gradients:
                         alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
@@ -153,7 +160,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                                             orig_shp=implicit_classifier_score.shape) \
                 if self.guidance == "projected" else classifier_score
             
-            print(f"Proj out shape {proj_out.size()}")
+            print(f"Proj out shape {proj_out[0].size()}")
 
             classifier_score = proj_out if self.cone_projection_type == "default" else proj_out[0].view_as(classifier_score)
             concensus_region = proj_out[1].unsqueeze(1) if self.cone_projection_type == "binning" else None
@@ -203,3 +210,167 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                 self.probs.append(prob_best_class.detach().cpu())
 
         return e_t
+    
+
+    def concept_conditional_score(self, x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale=1, unconditional_conditioning=None, y=None):
+        # return super().conditional_score(x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale, unconditional_conditioning, y)
+        """
+        Args:
+            x: input image
+            t: time step
+            c: conditioning
+            index: index for the schedule
+            use_original_steps: whether to use the original steps
+            quantize_denoised: whether to quantize the denoised image
+            unconditional_guidance_scale: scale for the unconditional guidance
+            unconditional_conditioning: unconditional conditioning
+            y: target class
+
+
+        Returns:
+            e_t: score after conditioning
+
+        """
+
+        b, *_, device = *x.shape, x.device
+        x = x.detach()
+        # prob_best_class = None
+        mask_guidance = None
+
+        ## check if gradient tracking is on for x
+        if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
+            e_t = self.model.apply_model(x, t, c)
+            return e_t
+        
+        score_out = torch.zeros_like(x)
+
+        # Get output of denoising model
+        with torch.enable_grad():
+            x_noise = x.detach().requires_grad_()
+            ret_vals = self.get_output(x_noise, t, c, index, unconditional_conditioning,
+                                                        use_original_steps, quantize_denoised=quantize_denoised,
+                                                        return_decoded=True, return_pred_latent_x0=self.log_backprop_gradients)
+            if self.log_backprop_gradients:
+                e_t_uncond, e_t, pred_x0, pred_latent_x0 = ret_vals
+            else:
+                e_t_uncond, e_t, pred_x0 = ret_vals
+
+        with torch.no_grad():
+            if self.lp_custom:          # changed from elif
+                with torch.enable_grad():
+                    pred_x0_0to1 = torch.clamp(_map_img(pred_x0), min=0.0, max=1.0)
+                    lp_dist = self.distance_criterion(pred_x0_0to1, self.init_images.to(x.device))
+                    lp_grad = torch.autograd.grad(lp_dist.mean(), x_noise, retain_graph=True)[0]
+
+                    print(f"Init_images: {self.init_images.size()}")
+                    print(f"lp_grad: {lp_grad.size()}, lp_dist: {lp_dist}, pred_x0_0to1: {pred_x0_0to1.size()}")
+            #########################################
+            # Get classifier prediction & gradients
+            #########################################
+            if self.classifier_lambda != 0:
+                with torch.enable_grad():
+
+                    pred_logits = self.get_classifier_logits(pred_x0)
+                    print(f"classifier logits: {pred_logits.size()} for pred_x0: {pred_x0.size()}")
+                    # if len(pred_logits.shape) == 2: # multi-class
+                    #     log_probs = torch.nn.functional.log_softmax(pred_logits, dim=-1)
+                    #     log_probs = log_probs[range(log_probs.size(0)), y.view(-1)]
+                    #     prob_best_class = torch.exp(log_probs).detach()
+                    # else: # binary
+                    loss = self.binary_classification_criterion(pred_logits, y)
+                    loss *= -1 # minimize this
+                    log_probs = loss
+                    prob_best_class = pred_logits.sigmoid().detach()
+
+                    if self.log_backprop_gradients: pred_latent_x0.retain_grad()
+
+                    #############################################################################
+                    # Concept-based conditioning                                                #
+                    # In the backward pass of the classifier, the gradient computation          #
+                    # can be constrained to specific concepts.                                  #
+                    # Thereby, the gradient w.r.t pred_x0 changes, which is backpropagated      #
+                    # through the First stage decoder to compute the gradient w.r.t x_noise.    #
+                    # By constraining the gradient to single concepts, we hope to restrain      #
+                    # the generation to class-specific changes in these concepts only.          #
+                    #############################################################################
+                    grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
+                    # grad_classifier2 = torch.autograd.grad(log_probs[0].sum(), x_noise, retain_graph=False)[0]
+
+                    print(f"Log probs shape: {log_probs.size()}, x_noise: {x_noise.size()}")
+                    print(f"Grad classifier shape: {grad_classifier.size()}")
+
+        implicit_classifier_score = (e_t - e_t_uncond)  # .detach()
+        # check gradient tracking on implicit_classifier_score
+        assert implicit_classifier_score.requires_grad == False, "implicit_classifier_score requires grad"
+
+        if self.lp_custom or self.classifier_lambda != 0:
+            alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
+            a_t = torch.full((b, 1, 1, 1), alphas[index], device=device)
+
+        if self.classifier_lambda != 0:
+            classifier_score = -1 * grad_classifier * (1 - a_t).sqrt()              # scaled target model gradients
+            assert classifier_score.requires_grad == False, "classifier_score requires grad"
+
+            # project the gradient of the classifier on the implicit classifier
+            projection_fn = cone_project if self.cone_projection_type == "default" else cone_project_chuncked
+            projection_fn = cone_project_chuncked_zero if "zero" in self.cone_projection_type else projection_fn
+
+
+            # projection function: zero_binning -> cone_project_chuncked_zero
+            proj_out = projection_fn(implicit_classifier_score.view(x.shape[0], -1),
+                                            classifier_score.view(x.shape[0], -1),
+                                            self.deg_cone_projection,
+                                            orig_shp=implicit_classifier_score.shape) \
+                if self.guidance == "projected" else classifier_score
+            
+            print(f"Proj out shape {proj_out[0].size()} with min {torch.min(proj_out[0])} and max {torch.max(proj_out[0])}")
+
+            classifier_score = proj_out if self.cone_projection_type == "default" else proj_out[0].view_as(classifier_score)
+            concensus_region = proj_out[1].unsqueeze(1) if self.cone_projection_type == "binning" else None
+            #print(classifier_score.shape, concensus_region.shape)
+            if self.enforce_same_norms:
+                score_, norm_ = _renormalize_gradient(classifier_score,
+                                                      implicit_classifier_score)  # e_t_uncond (AWAREE!!)
+                classifier_score = self.classifier_lambda * score_
+
+            else:
+                classifier_score *= self.classifier_lambda
+
+            score_out += classifier_score
+
+        # distance gradients
+        if self.lp_custom:
+
+            lp_score = -1 * lp_grad * (1 - a_t).sqrt()
+
+            if self.enforce_same_norms:
+                score_, norm_ = _renormalize_gradient(lp_score,
+                                                      implicit_classifier_score)
+                lp_score = self.dist_lambda * score_
+
+            else:
+
+                lp_score *= self.dist_lambda
+
+            score_out -= lp_score
+
+        e_t = e_t_uncond + unconditional_guidance_scale * score_out  # (1 - a_t).sqrt() * grad_out
+
+        print(f"Score out: {score_out.size()}, e_t: {e_t.size()}")
+
+
+        # if self.record_intermediate_results:
+        #     # adding images to create a gif
+        #     pred_x0_copy = pred_x0.clone().detach()
+        #     img = torch.clamp(_map_img(pred_x0_copy), min=0.0, max=1.0)
+        #     #img = torch.permute(img, (1, 2, 0, 3)).reshape((img.shape[1], img.shape[2], -1))
+
+        #     self.images.append(img.detach().cpu())
+        #     if self.classifier_lambda != 0 and self.cone_projection_type == "binning":
+        #         self.concensus_regions.append(concensus_region.detach().cpu())
+
+        #     if prob_best_class is not None:
+        #         self.probs.append(prob_best_class.detach().cpu())
+
+        return e_t
+

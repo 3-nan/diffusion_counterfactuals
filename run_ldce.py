@@ -42,7 +42,8 @@ from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generat
 import sys
 import regex as re
 from ldce.ldm import *
-from ldce.ldm.models.diffusion.cc_ddim import CCMDDIMSampler
+# from ldce.ldm.models.diffusion.cc_ddim import CCMDDIMSampler
+from src.cc_ddim import ConceptCCMDDIMSampler as CCMDDIMSampler
 
 from ldce.data.imagenet_classnames import name_map, openai_imagenet_classes
 
