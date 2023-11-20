@@ -22,3 +22,4 @@ git+https://github.com/pytorch/text.git@v0.10.0
 # git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
 werkzeug==2.3.7
 wheel==0.38.4
+zennit
