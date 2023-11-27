@@ -19,10 +19,10 @@ torch.backends.cuda.matmul.allow_tf32 = True
 # from contextlib import nullcontext
 from torch import autocast
 
-from omegaconf import OmegaConf, open_dict
+from omegaconf import OmegaConf, open_dict, DictConfig
 import hydra
 from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
+# from omegaconf import DictConfig, OmegaConf
 # import wandb
 import torchvision
 from torchvision import transforms, datasets
@@ -244,6 +244,8 @@ def main(cfg : DictConfig) -> None:
     classifier_model.to(device).eval()
     classifier_model.train = disabled_train
 
+    print([f"{n}: {type(m)}" for n, m in classifier_model.named_modules() if isinstance(m, torch.nn.modules.conv.Conv2d)])
+
     ddim_steps = cfg.ddim_steps
     ddim_eta = cfg.ddim_eta
     scale = cfg.scale #for unconditional guidance
@@ -307,7 +309,8 @@ def main(cfg : DictConfig) -> None:
         raise NotImplementedError
 
     if "ImageNet" in cfg.data._target_:
-        with open('data/synset_closest_idx.yaml', 'r') as file:
+        with open('data/synset_single_idx.yaml', 'r') as file:
+        # with open('data/synset_closest_idx.yaml', 'r') as file:
             synset_closest_idx = yaml.safe_load(file)
     # elif "Flowers102" in cfg.data._target_:
     #     with open("data/flowers_closest_indices.json") as file:
@@ -371,7 +374,11 @@ def main(cfg : DictConfig) -> None:
         
         for j, l in enumerate(label):
             print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
-        
+
+        # Compute concept conditioning
+        concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.19', tgt_classes)
+
+
         init_image = image.clone() #image.repeat(n_samples_per_class, 1, 1, 1).to(device)
         sampler.init_images = init_image.to(device)
         sampler.init_labels = label # n_samples_per_class * [label]

@@ -8,10 +8,14 @@ import functools
 import numpy as np
 import torch
 import torchvision.transforms.functional as tf
+from tqdm import tqdm
 from zennit.composites import NameMapComposite
 from zennit.core import Hook, RemovableHandle, RemovableHandleList
 from ldce.ldm.models.diffusion.cc_ddim import CCMDDIMSampler
 from ldce.sampling_helpers import cone_project, cone_project_chuncked, cone_project_chuncked_zero, normalize, _renormalize_gradient, _map_img
+from ldm.modules.diffusionmodules.util import noise_like
+
+from .concept_extraction import compute_concept_conditioning
 
 
 class MaskHook(Hook):
@@ -192,6 +196,59 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
         Concept guidance shall be added.
     """
 
+    @torch.no_grad()
+    def ddim_sampling(self, cond, shape,
+                      x_T=None, ddim_use_original_steps=False,
+                      callback=None, timesteps=None, quantize_denoised=False,
+                      mask=None, x0=None, img_callback=None, log_every_t=100,
+                      temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
+                      unconditional_guidance_scale=1., unconditional_conditioning=None, ):
+
+        device = self.model.betas.device
+        b = shape[0]
+        if x_T is None:
+            img = torch.randn(shape, device=device)
+        else:
+            img = x_T
+
+        if timesteps is None:
+            timesteps = self.ddpm_num_timesteps if ddim_use_original_steps else self.ddim_timesteps
+        elif timesteps is not None and not ddim_use_original_steps:
+            subset_end = int(min(timesteps / self.ddim_timesteps.shape[0], 1) * self.ddim_timesteps.shape[0]) - 1
+            timesteps = self.ddim_timesteps[:subset_end]
+
+        intermediates = {'x_inter': [img], 'pred_x0': [img]}
+        time_range = reversed(range(0, timesteps)) if ddim_use_original_steps else np.flip(timesteps)
+        total_steps = timesteps if ddim_use_original_steps else timesteps.shape[0]
+        print(f"Running DDIM Sampling with {total_steps} timesteps")
+
+        iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
+
+        for i, step in enumerate(iterator):
+            index = total_steps - i - 1
+            ts = torch.full((b,), step, device=device, dtype=torch.long)
+
+            if mask is not None:
+                assert x0 is not None
+                img_orig = self.model.q_sample(x0, ts)  # TODO: deterministic forward pass?
+                img = img_orig * mask + (1. - mask) * img
+
+            outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
+                                      quantize_denoised=quantize_denoised, temperature=temperature,
+                                      noise_dropout=noise_dropout, score_corrector=score_corrector,
+                                      corrector_kwargs=corrector_kwargs,
+                                      unconditional_guidance_scale=unconditional_guidance_scale,
+                                      unconditional_conditioning=unconditional_conditioning)
+            img, pred_x0 = outs
+            if callback: callback(i)
+            if img_callback: img_callback(pred_x0, i)
+
+            if index % log_every_t == 0 or index == total_steps - 1:
+                intermediates['x_inter'].append(img)
+                intermediates['pred_x0'].append(pred_x0)
+
+        return img, intermediates
+
     def conditional_score(self, x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale=1, unconditional_conditioning=None, y=None):
         # return super().conditional_score(x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale, unconditional_conditioning, y)
         """
@@ -258,8 +315,8 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     lp_dist = self.distance_criterion(pred_x0_0to1, self.init_images.to(x.device))
                     lp_grad = torch.autograd.grad(lp_dist.mean(), x_noise, retain_graph=True)[0]
 
-                    print(f"Init_images: {self.init_images.size()}")
-                    print(f"lp_grad: {lp_grad.size()}, lp_dist: {lp_dist}, pred_x0_0to1: {pred_x0_0to1.size()}")
+                    # print(f"Init_images: {self.init_images.size()}")
+                    # print(f"lp_grad: {lp_grad.size()}, lp_dist: {lp_dist}, pred_x0_0to1: {pred_x0_0to1.size()}")
 
             #########################################
             # Get classifier prediction & gradients
@@ -276,7 +333,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     #     else:
                     #         e_t_uncond, e_t, pred_x0 = ret_vals
                     pred_logits = self.get_classifier_logits(pred_x0)
-                    print(f"classifier logits: {pred_logits.size()} for pred_x0: {pred_x0.size()}")
+                    # print(f"classifier logits: {pred_logits.size()} for pred_x0: {pred_x0.size()}")
                     if len(pred_logits.shape) == 2: # multi-class
                         log_probs = torch.nn.functional.log_softmax(pred_logits, dim=-1)
                         log_probs = log_probs[range(log_probs.size(0)), y.view(-1)]
@@ -295,8 +352,8 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
                         # grad_classifier2 = torch.autograd.grad(log_probs[0].sum(), x_noise, retain_graph=False)[0]
 
-                    print(f"Log probs shape: {log_probs.size()}, x_noise: {x_noise.size()}")
-                    print(f"Grad classifier shape: {grad_classifier.size()}")
+                    # print(f"Log probs shape: {log_probs.size()}, x_noise: {x_noise.size()}")
+                    # print(f"Grad classifier shape: {grad_classifier.size()}")
 
                     if self.log_backprop_gradients:
                         alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
@@ -341,7 +398,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                                             orig_shp=implicit_classifier_score.shape) \
                 if self.guidance == "projected" else classifier_score
             
-            print(f"Proj out shape {proj_out[0].size()}")
+            # print(f"Proj out shape {proj_out[0].size()}")
 
             classifier_score = proj_out if self.cone_projection_type == "default" else proj_out[0].view_as(classifier_score)
             concensus_region = proj_out[1].unsqueeze(1) if self.cone_projection_type == "binning" else None
@@ -374,7 +431,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
 
         e_t = e_t_uncond + unconditional_guidance_scale * score_out  # (1 - a_t).sqrt() * grad_out
 
-        print(f"Score out: {score_out.size()}, e_t: {e_t.size()}")
+        # print(f"Score out: {score_out.size()}, e_t: {e_t.size()}")
 
 
         if self.record_intermediate_results:
@@ -452,7 +509,12 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
             if self.classifier_lambda != 0:
 
                 # add conditions for masking
-                conditions = [{'layer3.5.conv1': range(40)}]
+                # conditions = [{'layer3.5.conv1': range(40)}]
+                x = _map_img(pred_x0)
+                if not self.classifier_wrapper: # only works for ImageNet!
+                    x = tf.center_crop(x, 224)
+                    x = normalize(x)
+                conditions = compute_concept_conditioning(self.classifier, x, 'features.2', y)
 
                 with torch.enable_grad():
 
@@ -504,10 +566,69 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                         # print([m for m, n in self.classifier.named_modules()])
 
                         grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
+
+                        # torch.autograd.backward(log_probs, y, retain_graph=True)
+                        # grad_classifier = x_noise.grad
+
                     # grad_classifier2 = torch.autograd.grad(log_probs[0].sum(), x_noise, retain_graph=False)[0]
 
                         # print(f"Log probs shape: {log_probs.size()}, x_noise: {x_noise.size()}")
-                        # print(f"Grad classifier shape: {grad_classifier.size()}")
+                #         print(f"Grad classifier shape: {grad_classifier.size()}")
+                
+                # grad_classifier = []
+
+                # for sample, x_noi, condition in zip(pred_x0, x_noise, conditions):
+
+                #     # print(sample.size())
+                #     # print(x_noi.size())
+                #     # print(condition)
+                #     # sample.retain_grad()
+
+                #     with torch.enable_grad():
+
+                #         hook_map, y_targets = {}, []
+                #         for i, cond in enumerate([condition]):
+                #             for l_name, indices in cond.items():
+                #                 # if l_name == self.MODEL_OUTPUT_NAME:
+                #                 if l_name == 'y':
+                #                     y_targets.append(indices)
+                #                 else:
+                #                     if l_name not in hook_map:
+                #                         hook_map[l_name] = MaskHook([])
+                #                     _register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name)
+
+                #         name_map = [([name], hook) for name, hook in hook_map.items()]
+                #         mask_composite = NameMapComposite(name_map)
+
+                #         with mask_composite.context(self.classifier) as modified:
+                #             sample = _map_img(sample.unsqueeze(0))
+                #             if not self.classifier_wrapper: # only works for ImageNet!
+                #                 sample = tf.center_crop(sample, 224)
+                #                 sample = normalize(sample)
+                #             pred_logits = modified(sample)
+
+                #             if len(pred_logits.shape) == 2: # multi-class
+                #                 log_probs = torch.nn.functional.log_softmax(pred_logits, dim=-1)
+                #                 log_probs = log_probs[range(log_probs.size(0)), y.view(-1)]
+                #                 prob_best_class = torch.exp(log_probs).detach()
+                #             else: # binary
+                #                 loss = self.binary_classification_criterion(pred_logits, y)
+                #                 loss *= -1 # minimize this
+                #                 log_probs = loss
+                #                 prob_best_class = pred_logits.sigmoid().detach()
+
+                #             if self.log_backprop_gradients: pred_latent_x0.retain_grad()
+
+                #             print(log_probs)
+                #             grad_cf_sample = torch.autograd.grad(log_probs.sum(), x_noise[0].unsqueeze(0), retain_graph=True)[0]
+
+                #             grad_classifier.append(grad_cf_sample)
+
+                # grad_classifier = torch.cat(grad_classifier)
+
+                # print(f"Grad classifier shape: {grad_classifier.size()}")
+
+                # raise ValueError
 
         implicit_classifier_score = (e_t - e_t_uncond)  # .detach()
         # check gradient tracking on implicit_classifier_score
@@ -584,3 +705,48 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
 
         return e_t
 
+
+    @torch.no_grad()
+    def p_sample_ddim(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
+                      temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
+                      unconditional_guidance_scale=1., unconditional_conditioning=None, y=None):
+        b, *_, device = *x.shape, x.device
+
+        BASELINE = False
+
+        if BASELINE:
+            e_t = self.conditional_score(x=x, c=c, t=t, index=index, use_original_steps=use_original_steps,
+                                        quantize_denoised=quantize_denoised,
+                                        unconditional_guidance_scale=unconditional_guidance_scale,
+                                        unconditional_conditioning=unconditional_conditioning, y=y)
+        else:
+            e_t = self.new_conditional_score(x=x, c=c, t=t, index=index, use_original_steps=use_original_steps,
+                                        quantize_denoised=quantize_denoised,
+                                        unconditional_guidance_scale=unconditional_guidance_scale,
+                                        unconditional_conditioning=unconditional_conditioning, y=y)
+
+        if score_corrector is not None:
+            assert self.model.parameterization == "eps"
+            e_t = score_corrector.modify_score(self.model, e_t, x, t, c, **corrector_kwargs)
+
+        alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
+        alphas_prev = self.model.alphas_cumprod_prev if use_original_steps else self.ddim_alphas_prev
+        sqrt_one_minus_alphas = self.model.sqrt_one_minus_alphas_cumprod if use_original_steps else self.ddim_sqrt_one_minus_alphas
+        sigmas = self.model.ddim_sigmas_for_original_num_steps if use_original_steps else self.ddim_sigmas
+        # select parameters corresponding to the currently considered timestep
+        a_t = torch.full((b, 1, 1, 1), alphas[index], device=device)
+        a_prev = torch.full((b, 1, 1, 1), alphas_prev[index], device=device)
+        sigma_t = torch.full((b, 1, 1, 1), sigmas[index], device=device)
+        sqrt_one_minus_at = torch.full((b, 1, 1, 1), sqrt_one_minus_alphas[index], device=device)
+
+        # current prediction for x_0
+        pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
+        if quantize_denoised:
+            pred_x0, _, *_ = self.model.first_stage_model.quantize(pred_x0)
+        # direction pointing to x_t
+        dir_xt = (1. - a_prev - sigma_t ** 2).sqrt() * e_t
+        noise = sigma_t * noise_like(x.shape, device, repeat_noise) * temperature
+        if noise_dropout > 0.:
+            noise = torch.nn.functional.dropout(noise, p=noise_dropout)
+        x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
+        return x_prev, pred_x0

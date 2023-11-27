@@ -34,6 +34,8 @@ ENV SSL_CERT_DIR=/etc/ssl/certs
 
 ENV HYDRA_FULL_ERROR=1
 
+RUN export HDF5_USE_FILE_LOCKING='FALSE'
+
 COPY configs/ ./configs
 COPY data/ ./data
 COPY models/ ./models
@@ -42,6 +44,8 @@ COPY run_ldce.py ./run_ldce.py
 # COPY convert_imagenet.py ./convert_imagenet.py
 COPY test_stuff.py ./test_stuff.py
 
-CMD ["python", "run_ldce.py", "--config-name=v1_wider"]
+# CMD ["python", "run_ldce.py", "--config-name=v1_wider"]
+# CMD ["python", "src/encode_dataset.py", "--config-name=v1_wider"]
+CMD ["python", "src/concept_maximization.py", "--config-name=v1_wider"]
 # CMD ["python", "convert_imagenet.py"]
 # CMD ["python", "test_stuff.py"]
