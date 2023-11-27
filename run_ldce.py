@@ -380,7 +380,7 @@ def main(cfg : DictConfig) -> None:
             print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
 
         # Compute concept conditioning
-        concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.17', tgt_classes)
+        concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.19', tgt_classes)
         print(f"Concept conditions: {concept_conditions}")
 
         init_image = image.clone() #image.repeat(n_samples_per_class, 1, 1, 1).to(device)
@@ -497,6 +497,7 @@ def main(cfg : DictConfig) -> None:
                 "in_tgt_confid": in_confid_tgt[j].cpu().item(), 
                 "closness_1": lp1, 
                 "closness_2": lp2,
+                "concept_conditions": concept_conditions,
             }
             if cfg.record_intermediate_results:
                 if all_videos is not None:

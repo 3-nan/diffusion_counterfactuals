@@ -58,6 +58,9 @@ class MaskHook:
             module.register_forward_hook(self.post_forward),
         ])
 
+def max_norm(attr, stabilize=1e-10):
+    
+    return attr / (attr.max() + stabilize)
 
 # @staticmethod
 def mask_map(batch_id: int, concept_ids: List, layer_name=None):
@@ -81,6 +84,8 @@ def mask_map(batch_id: int, concept_ids: List, layer_name=None):
         mask = torch.zeros_like(grad[batch_id])
         mask[concept_ids] = 1
         grad[batch_id] = grad[batch_id] * mask
+
+        grad[batch_id] = max_norm(grad[batch_id])
 
         return grad
 
@@ -139,9 +144,9 @@ def compute_concept_explanation(model, data, labels, layer_name, concept_id):
 
     target = torch.eye(1000, device=data.device)[labels]
 
-    with zennit.attribution.Gradient(model, composite=None) as attributor:
+    # with zennit.attribution.Gradient(model, composite=None) as attributor:
 
-        out, rel = attributor(data, target)
+    #     out, rel = attributor(data, target)
 
 
     # Define condition

@@ -2,6 +2,7 @@
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from torchvision.transforms.functional import gaussian_blur
 import zennit
 
@@ -46,6 +47,7 @@ def get_crop_range(heatmap, crop_th):
 
 def crop_relevance_field(attr, img, rf=False, alpha=0.3, vis_th=0.2, crop_th=0.1, kernel_size=19):
 
+    attr = torch.from_numpy(attr)
     filtered_heat = max_norm(gaussian_blur(attr.unsqueeze(0), kernel_size=kernel_size)[0])
     vis_mask = filtered_heat > vis_th
     

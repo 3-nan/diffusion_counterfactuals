@@ -115,6 +115,8 @@ def main(cfg : DictConfig) -> None:
         print(layer_name)
         layer_attr = load_layer_attribution(attributions_file_path, layer_name)
 
+        # layer_attr = layer_attr / (np.abs(layer_attr).sum(0).view(-1, 1) + 1e-10)
+
         # print(f"{layer_name}: {layer_attr.shape}")
         # print([f"{n}: {type(m)}" for n, m  in classifier.named_modules()])
 

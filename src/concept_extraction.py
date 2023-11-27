@@ -30,7 +30,8 @@ def get_latent_representation(classifier, sample, layer, label):
 
     # print(f"Target size: {target.size()}")
     # create a composite
-    composite = zennit.composites.EpsilonPlusFlat(canonizers=[zennit.torchvision.VGGCanonizer()])
+    # composite = zennit.composites.EpsilonPlusFlat(canonizers=[zennit.torchvision.VGGCanonizer()])
+    composite = None
 
     layer_out = {}
 

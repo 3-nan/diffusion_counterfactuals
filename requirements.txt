@@ -5,6 +5,7 @@ hydra-core==1.3.2
 h5py
 huggingface-hub==0.16.4
 kornia==0.6.0
+matplotlib
 omegaconf==2.3.0
 pandas==1.5.3
 pytorch-fid==0.3.0
