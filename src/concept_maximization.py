@@ -40,31 +40,6 @@ def append_concepts_to_concept_database(concept_file_path, layer_name, concept_i
                 compression='gzip',
             )
 
-            # attributions_file.create_dataset(
-            #     'attribution',
-            #     shape=(0,) + attribution_shape,
-            #     dtype='float32',
-            #     maxshape=(None,) + attribution_shape,
-            #     chunks=True,
-            #     compression='gzip'
-            # )
-            # attributions_file.create_dataset(
-            #     'prediction',
-            #     shape=(0,) + number_of_predictions,
-            #     dtype='float32',
-            #     maxshape=(None,) + number_of_predictions,
-            #     chunks=True,
-            #     compression='gzip'
-            # )
-            # attributions_file.create_dataset(
-            #     'label',
-            #     shape=(0,),
-            #     dtype='uint16',
-            #     maxshape=(None,),
-            #     chunks=True,
-            #     compression='gzip'
-            # )
-
     # Appends the attributions, their predictions, and their ground-truth labels to the attributions file
     with h5py.File(concept_file_path, 'a', locking=False) as concept_file:
 
@@ -102,30 +77,6 @@ def append_concepts_to_concept_database(concept_file_path, layer_name, concept_i
 
         concept_group['attribution'][:] = attrs
         concept_group['img_id'][:] = img_inds
-        # # number_of_existing_attributions = attrs['prediction'].shape[0]  # pylint: disable=no-member
-        # number_of_new_attributions = attrs.shape[0]
-
-        # # Resizes the HDF5 datasets for the attributions, their predictions, and their ground-truth labels, so that
-        # # they can fit the attributions that are to be appended
-        # for layer_name in attributions_dict:
-        #     attributions_file['attribution'][layer_name].resize(  # pylint: disable=no-member
-        #         number_of_existing_attributions + number_of_new_attributions,
-        #         axis=0
-        #     )
-        # attributions_file['prediction'].resize(  # pylint: disable=no-member
-        #     number_of_existing_attributions + number_of_new_attributions,
-        #     axis=0
-        # )
-        # attributions_file['label'].resize(  # pylint: disable=no-member
-        #     number_of_existing_attributions + number_of_new_attributions,
-        #     axis=0
-        # )
-
-        # # Appends the attributions, their predictions, and their ground-truth labels to the attributions file
-        # for layer_name, attrs in attributions_dict.items():
-        #     attributions_file['attribution'][layer_name][number_of_existing_attributions:] = attrs
-        # attributions_file['prediction'][number_of_existing_attributions:] = predictions
-        # attributions_file['label'][number_of_existing_attributions:] = labels
 
 
 def load_layer_attribution(attributions_file_path, layer_name):

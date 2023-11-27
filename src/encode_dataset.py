@@ -211,7 +211,8 @@ def main(cfg : DictConfig) -> None:
     results_path = os.path.join(cfg.output_dir, "data_representation")
     os.makedirs(results_path, exist_ok=True)
     attributions_file_path = os.path.join(results_path, 'imagenet_rels.h5')
-    os.remove(attributions_file_path)
+    if os.path.exists(attributions_file_path):
+        os.remove(attributions_file_path)
 
     # Load model
     classifier_model = get_classifier(cfg, device)

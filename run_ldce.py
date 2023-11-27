@@ -34,7 +34,7 @@ from torchvision.utils import save_image
 # except:
 #     print("segment_anything not installed")
 # from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
-from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
+from ldce.sampling_helpers import disabled_train, get_model, _unmap_img
 # from ldce.sampling_helpers import load_model_hf
 # import json
 
@@ -57,6 +57,10 @@ from ldce.utils.preprocessor import Normalizer, CropAndNormalizer, ResizeAndNorm
 # from utils.vision_language_wrapper import VisionLanguageWrapper
 from ldce.utils.madry_net import MadryNet
 # from utils.dino_linear import LinearClassifier, DINOLinear
+
+from src.concept_extraction import compute_concept_conditioning
+from src.sampling import generate_samples
+
 
 def set_seed(seed: int = 0):
     torch.manual_seed(seed)
@@ -376,8 +380,8 @@ def main(cfg : DictConfig) -> None:
             print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
 
         # Compute concept conditioning
-        concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.19', tgt_classes)
-
+        concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.17', tgt_classes)
+        print(f"Concept conditions: {concept_conditions}")
 
         init_image = image.clone() #image.repeat(n_samples_per_class, 1, 1, 1).to(device)
         sampler.init_images = init_image.to(device)
@@ -422,18 +426,19 @@ def main(cfg : DictConfig) -> None:
             prompts = None
         
         out = generate_samples(
-            model, 
-            sampler, 
-            tgt_classes, 
-            ddim_steps, 
-            scale, 
+            model,
+            sampler,
+            tgt_classes,
+            ddim_steps,
+            scale,
             init_latent=init_latent.to(device),
-            t_enc=t_enc, 
-            init_image=init_image.to(device), 
-            ccdddim=True, 
+            t_enc=t_enc,
+            init_image=init_image.to(device),
+            ccdddim=True,
             latent_t_0=cfg.get("latent_t_0", False),
-            prompts=prompts, 
+            prompts=prompts,
             seed=seed,
+            concept_conditions=concept_conditions,
         )
         print("Samples generated successfully.")
 

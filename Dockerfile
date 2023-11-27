@@ -45,7 +45,7 @@ COPY run_ldce.py ./run_ldce.py
 COPY test_stuff.py ./test_stuff.py
 
 # CMD ["python", "run_ldce.py", "--config-name=v1_wider"]
-# CMD ["python", "src/encode_dataset.py", "--config-name=v1_wider"]
-CMD ["python", "src/concept_maximization.py", "--config-name=v1_wider"]
+CMD ["python", "src/encode_dataset.py", "--config-name=v1_wider"]
+# CMD ["python", "src/concept_maximization.py", "--config-name=v1_wider"]
 # CMD ["python", "convert_imagenet.py"]
 # CMD ["python", "test_stuff.py"]

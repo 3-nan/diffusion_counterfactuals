@@ -29,6 +29,8 @@ def get_latent_representation(classifier, sample, layer, label):
     target = torch.eye(1000, device=inp.device)[[label]]
 
     # print(f"Target size: {target.size()}")
+    # create a composite
+    composite = zennit.composites.EpsilonPlusFlat(canonizers=[zennit.torchvision.VGGCanonizer()])
 
     layer_out = {}
 
@@ -36,7 +38,7 @@ def get_latent_representation(classifier, sample, layer, label):
         layer.register_forward_hook(_generate_hook('layer', layer_out))
     ]
 
-    with zennit.attribution.Gradient(classifier, composite=None) as attributor:
+    with zennit.attribution.Gradient(classifier, composite=composite) as attributor:
 
         out, rel = attributor(inp, target)
 
