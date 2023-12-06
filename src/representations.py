@@ -13,8 +13,8 @@ def compute_layer_attributions(classifier, imgs, targets, layers=None):
     """ Compute explanations. """
 
     # create a composite
-    composite = zennit.composites.EpsilonPlusFlat(canonizers=[zennit.torchvision.VGGCanonizer()])
-
+    canonizers = [zennit.torchvision.VGGCanonizer()]
+    composite = zennit.composites.EpsilonGammaBox(0., 1., gamma=0.1, canonizers=canonizers)
     # choose a target class for the attribution
     target = torch.eye(1000)[targets]
     target = target.to(targets.device)
@@ -37,9 +37,32 @@ def compute_layer_attributions(classifier, imgs, targets, layers=None):
     for handle in handles:
         handle.remove()
 
-    attribution_dict = {}
+    activation_dict, norm_activation_dict = {}, {}
+    attribution_dict, norm_attribution_dict = {}, {}
+    rf_neuron_dict = {}
+
     for name, module in zip(layers, modules):
+        act = module.output
         attr = module.output.grad
-        attribution_dict[name] = attr.detach().cpu().sum(axis=[2,3])
+
+        # test some code
+        attr = attr.detach().cpu()
+        act = act.detach().cpu()
+
+        rf_neuron = torch.argmax(attr.flatten(start_dim=2), dim=-1)
+
+        channel_act = act.sum(axis=[2,3])
+        channel_attr = attr.sum(axis=[2,3])
+
+        norm_channel_act = channel_act / (torch.abs(channel_act).sum(-1).view(-1, 1) + 1e-10)
+        norm_channel_attr = channel_attr / (torch.abs(channel_attr).sum(-1).view(-1, 1) + 1e-10)
+
+        activation_dict[name] = channel_act
+        norm_activation_dict[name] = norm_channel_act
+
+        attribution_dict[name] = channel_attr
+        norm_attribution_dict[name] = norm_channel_attr
+
+        rf_neuron_dict[name] = rf_neuron
     
-    return attribution_dict
+    return activation_dict, norm_activation_dict, attribution_dict, norm_attribution_dict, rf_neuron_dict

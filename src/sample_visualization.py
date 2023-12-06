@@ -25,7 +25,7 @@ def main(cfg : DictConfig):
     results_path = os.path.join(cfg.output_dir, "data_representation")
     os.makedirs(results_path, exist_ok=True)
 
-    activations_file_path = os.path.join(results_path, 'imagenet_acts_samples')
+    activations_file_path = os.path.join(results_path, 'imagenet_acts_samples.h5')
     attributions_file_path = os.path.join(results_path, 'imagenet_rels_samples.h5')
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -76,17 +76,17 @@ def main(cfg : DictConfig):
 
         # Save representations in h5py
         append_attributions_to_attribution_database(
-            attributions_file_path,
-            attrs,
-            norm_attrs,
-            rf_neurons,
-            np.array(in_class_pred.cpu()),
-            np.array(label.cpu()))
-        
-        append_attributions_to_attribution_database(
             activations_file_path,
             acts,
             norm_acts,
+            rf_neurons,
+            np.array(in_class_pred.cpu()),
+            np.array(label.cpu()))
+
+        append_attributions_to_attribution_database(
+            attributions_file_path,
+            attrs,
+            norm_attrs,
             rf_neurons,
             np.array(in_class_pred.cpu()),
             np.array(label.cpu()))

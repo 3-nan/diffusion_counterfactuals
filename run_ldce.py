@@ -2,6 +2,7 @@ import argparse
 import os
 # import psutil
 import yaml
+import json
 import copy
 import random
 
@@ -325,6 +326,10 @@ def main(cfg : DictConfig) -> None:
     #         closest_indices = json.load(file)
     #     closest_indices = {int(k):v for k,v in closest_indices.items()}
 
+    with open(os.path.join(cfg.output_dir, 'concept_selection', 'conditions.json'), 'r') as conditions_file:
+        conditions = json.load(conditions_file)
+        # conditions = json.load(conditions_file)
+
     if not cfg.resume:
         torch.save({"last_data_idx": -1}, checkpoint_path)
     
@@ -337,7 +342,23 @@ def main(cfg : DictConfig) -> None:
             set_seed(seed=cfg.get("seed", 0)) if cfg.fixed_seed else None
             seed = seed if cfg.fixed_seed else -1
             
-        if "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
+        if "cond_tgt_cls" in cfg.data and cfg.data.cond_tgt_cls:
+            image,label, tgt_classes, unique_data_idx = batch
+
+            print(tgt_classes)
+
+            tgts = []
+            concept_conditions = []
+            for udi in unique_data_idx:
+                udi_cond = conditions[str(udi.item())]
+                tgts.append(int(udi_cond['y']))
+                cond = {'features.22': udi_cond['features.22'][:1]}
+                concept_conditions.append(cond)
+
+            tgt_classes = torch.tensor(tgts).to(device)     #from_numpy(np.array(tgts)).to(device)
+
+            print(tgt_classes)
+        elif "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
             image, label, tgt_classes, unique_data_idx = batch
             tgt_classes = tgt_classes.to(device) #squeeze()
         else:
@@ -380,7 +401,7 @@ def main(cfg : DictConfig) -> None:
             print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
 
         # Compute concept conditioning
-        concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.19', tgt_classes)
+        # concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.21', tgt_classes)
         print(f"Concept conditions: {concept_conditions}")
 
         init_image = image.clone() #image.repeat(n_samples_per_class, 1, 1, 1).to(device)
