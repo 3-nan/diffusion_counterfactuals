@@ -220,6 +220,13 @@ def main(cfg : DictConfig) -> None:
                 else:
                     raise NotImplementedError
 
+            print(unique_data_idx)
+
+            # use unique data idx to load counterfactuals
+
+            # encode counterfactuals
+
+            raise ValueError
             image = image.to(device)
             label = label.to(device)
             #shuffle tgt_classes

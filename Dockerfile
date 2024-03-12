@@ -22,12 +22,17 @@ RUN pip3 install -e git+https://github.com/openai/CLIP.git@main#egg=clip
 RUN pip3 install git+https://github.com/lmb-freiburg/ldce.git
 RUN git clone https://github.com/lmb-freiburg/ldce.git
 # RUN pip3 install ./ldce/ldm
+
+# RUN pip3 install git+https://github.com/rachtibat/zennit-crp
+
 RUN pip3 install certifi
 COPY ca-certificates /usr/local/share/ca-certificates
 RUN apt-get install --yes --no-install-recommends software-properties-common ca-certificates
 # RUN chmod 644 /usr/local/share/ca-certificates/continental.crt
 # RUN chmod 644 /usr/local/share/ca-certificates/conti-corp-it-security.crt
 RUN update-ca-certificates
+
+RUN pip3 install corelay[umap,hdbscan]
 
 # ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_DIR=/etc/ssl/certs
@@ -36,16 +41,39 @@ ENV HYDRA_FULL_ERROR=1
 
 RUN export HDF5_USE_FILE_LOCKING='FALSE'
 
+# COPY ./ldce/ldm/ ./ldm
+
 COPY configs/ ./configs
 COPY data/ ./data
 COPY models/ ./models
 COPY src/ ./src
 COPY run_ldce.py ./run_ldce.py
-# COPY convert_imagenet.py ./convert_imagenet.py
+COPY run_ldce_baseline.py ./run_ldce_baseline.py
+COPY run_concept_ldce.py ./run_concept_ldce.py
+COPY run_feature_optim.py ./run_feature_optim.py
+COPY run_evaluation.py ./run_evaluation.py
 COPY test_stuff.py ./test_stuff.py
 
+# CMD ["python", "run_ldce_baseline.py", "--config-name=v1_original"]
+CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
+
+# CMD ["python", "src/evaluation/compute_fid.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline"]
+# CMD ["python", "src/evaluation/compute_validity_metrics.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline", "--target-model=resnet50"]
+# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_concept_spatial37_12"]
+
+# CMD ["python", "src/clustering/compute_clustering.py", "--config-name=v1_cluster"]
+# CMD ["python", "src/concept_analysis.py", "--config-name=v1_concept"]
+# CMD ["python", "src/visualization/show_gradient_alignment.py"]
+
 # CMD ["python", "run_ldce.py", "--config-name=v1_wider"]
-CMD ["python", "src/encode_dataset.py", "--config-name=v1_wider"]
+# CMD ["python", "src/encode_dataset.py", "--config-name=v1_cluster"]
 # CMD ["python", "src/concept_maximization.py", "--config-name=v1_wider"]
+# CMD ["python", "src/target_selection.py", "--config-name=v1_wider"]
+# CMD ["python", "src/sample_visualization.py", "--config-name=v1_wider"]
+
+# CMD ["python", "src/visualization/visualizer.py", "--config-name=v1_wider"]
+
 # CMD ["python", "convert_imagenet.py"]
-# CMD ["python", "test_stuff.py"]
+# CMD ["python", "test_stuff.py", "--config-name=v1_wider"]
+
+# CMD ["python", "run_feature_optim.py", "--config-name=v1_dreamer"]

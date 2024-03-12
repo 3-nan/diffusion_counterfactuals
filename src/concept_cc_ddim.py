@@ -21,6 +21,16 @@ from ldm.modules.diffusionmodules.util import noise_like
 from .concept_extraction import compute_concept_conditioning
 
 
+def interpolation_fn(implicit_classifier_score, classifier_score):
+
+    mask = (classifier_score == 0.)
+
+    interpolated_classifier_score = torch.lerp(classifier_score, implicit_classifier_score, 0.5)
+
+    interpolated_classifier_score[mask] = 0.
+
+    return interpolated_classifier_score
+
 class MaskHook(Hook):
     """ Hook for masking on specified channels in the gradient computation. """
 
@@ -31,6 +41,8 @@ class MaskHook(Hook):
     def post_forward(self, module, input, output):
         '''Register a backward-hook to the resulting tensor right after the forward.'''
         hook_ref = weakref.ref(self)
+
+        output.retain_grad()
 
         @functools.wraps(self.backward)
         def wrapper(grad):
@@ -46,6 +58,7 @@ class MaskHook(Hook):
     
     def backward(self, module, grad):
         '''Hook applied during backward-pass'''
+
         for mask_fn in self.fn_list:
             grad = mask_fn(grad)
 
@@ -77,6 +90,31 @@ class MaskHook(Hook):
     #     mask = torch.zeros_like(gradient)
 
     #     return (gradient * mask, )
+
+def spatial_map(batch_id, concept_ids, layer_name=None):
+    """ concept_ids should already be a mask. """
+
+    def mask_fct(grad):
+        mask = concept_ids.to(grad.device)
+
+        grad = grad * mask
+
+        return grad
+
+    return mask_fct
+
+def batch_map(batch_id, concept_ids, layer_name=None):
+
+    def mask_fct(grad):
+        mask = torch.zeros_like(grad)
+        for l, line in enumerate(concept_ids):
+            mask[l, line, :, :] = 1
+
+        grad = grad * mask
+
+        return grad
+
+    return mask_fct
 # @staticmethod
 def mask_map(batch_id: int, concept_ids: List, layer_name=None):
     """
@@ -181,8 +219,13 @@ class GradConditioner:
 
         name_map = [([name], hook) for name, hook in hook_map.items()]
         mask_composite = NameMapComposite(name_map)
+        cmp = zennit.composites.Composite()
 
-        with mask_composite.context(self.model) as modified:
+        if not data.requires_grad:
+            raise ValueError(
+                "requires_grad attribute of 'data' must be True.")
+
+        with mask_composite.context(self.model), cmp.context(self.model) as modified:
 
             pred = modified(data)
             grad_mask = self.relevance_init(pred.detach().clone(), y_targets, init_rel)
@@ -401,10 +444,10 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
     
 
     # concept_conditional_score
-    def new_conditional_score(self, x, t, c, index, use_original_steps,
+    def concept_conditional_score(self, x, t, c, index, use_original_steps,
                               quantize_denoised, unconditional_guidance_scale=1,
                               unconditional_conditioning=None, y=None,
-                              concept_conditions=None):
+                              concept_conditions=None, spatial=False):
         # return super().conditional_score(x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale, unconditional_conditioning, y)
         """
         Args:
@@ -474,15 +517,25 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                 with torch.enable_grad():
 
                     hook_map, y_targets = {}, []
-                    for i, cond in enumerate(concept_conditions):
-                        for l_name, indices in cond.items():
-                            # if l_name == self.MODEL_OUTPUT_NAME:
-                            if l_name == 'y':
-                                y_targets.append(indices)
-                            else:
-                                if l_name not in hook_map:
-                                    hook_map[l_name] = MaskHook([])
-                                _register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name)
+
+                    for key in concept_conditions.keys():
+                        if key not in hook_map:
+                            hook_map[key] = MaskHook([])
+
+                        if spatial:
+                            _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
+                        else:
+                            _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
+
+                    # for i, cond in enumerate(concept_conditions):
+                    #     for l_name, indices in cond.items():
+                    #         # if l_name == self.MODEL_OUTPUT_NAME:
+                    #         if l_name == 'y':
+                    #             y_targets.append(indices)
+                    #         else:
+                    #             if l_name not in hook_map:
+                    #                 hook_map[l_name] = MaskHook([])
+                    #             _register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name)
 
                     name_map = [([name], hook) for name, hook in hook_map.items()]
                     mask_composite = NameMapComposite(name_map)
@@ -492,6 +545,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                         if not self.classifier_wrapper: # only works for ImageNet!
                             x = tf.center_crop(x, 224)
                             x = normalize(x)
+
                         pred_logits = modified(x)
 
                     # pred_logits = self.get_classifier_logits(pred_x0)
@@ -521,6 +575,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                         # print([m for m, n in self.classifier.named_modules()])
 
                         grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
+                        # grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=False)[0]
 
                         # torch.autograd.backward(log_probs, y, retain_graph=True)
                         # grad_classifier = x_noise.grad
@@ -529,61 +584,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
 
                         # print(f"Log probs shape: {log_probs.size()}, x_noise: {x_noise.size()}")
                 #         print(f"Grad classifier shape: {grad_classifier.size()}")
-                
-                # grad_classifier = []
 
-                # for sample, x_noi, condition in zip(pred_x0, x_noise, conditions):
-
-                #     # print(sample.size())
-                #     # print(x_noi.size())
-                #     # print(condition)
-                #     # sample.retain_grad()
-
-                #     with torch.enable_grad():
-
-                #         hook_map, y_targets = {}, []
-                #         for i, cond in enumerate([condition]):
-                #             for l_name, indices in cond.items():
-                #                 # if l_name == self.MODEL_OUTPUT_NAME:
-                #                 if l_name == 'y':
-                #                     y_targets.append(indices)
-                #                 else:
-                #                     if l_name not in hook_map:
-                #                         hook_map[l_name] = MaskHook([])
-                #                     _register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name)
-
-                #         name_map = [([name], hook) for name, hook in hook_map.items()]
-                #         mask_composite = NameMapComposite(name_map)
-
-                #         with mask_composite.context(self.classifier) as modified:
-                #             sample = _map_img(sample.unsqueeze(0))
-                #             if not self.classifier_wrapper: # only works for ImageNet!
-                #                 sample = tf.center_crop(sample, 224)
-                #                 sample = normalize(sample)
-                #             pred_logits = modified(sample)
-
-                #             if len(pred_logits.shape) == 2: # multi-class
-                #                 log_probs = torch.nn.functional.log_softmax(pred_logits, dim=-1)
-                #                 log_probs = log_probs[range(log_probs.size(0)), y.view(-1)]
-                #                 prob_best_class = torch.exp(log_probs).detach()
-                #             else: # binary
-                #                 loss = self.binary_classification_criterion(pred_logits, y)
-                #                 loss *= -1 # minimize this
-                #                 log_probs = loss
-                #                 prob_best_class = pred_logits.sigmoid().detach()
-
-                #             if self.log_backprop_gradients: pred_latent_x0.retain_grad()
-
-                #             print(log_probs)
-                #             grad_cf_sample = torch.autograd.grad(log_probs.sum(), x_noise[0].unsqueeze(0), retain_graph=True)[0]
-
-                #             grad_classifier.append(grad_cf_sample)
-
-                # grad_classifier = torch.cat(grad_classifier)
-
-                # print(f"Grad classifier shape: {grad_classifier.size()}")
-
-                # raise ValueError
 
         implicit_classifier_score = (e_t - e_t_uncond)  # .detach()
         # check gradient tracking on implicit_classifier_score
@@ -608,6 +609,21 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                                             self.deg_cone_projection,
                                             orig_shp=implicit_classifier_score.shape) \
                 if self.guidance == "projected" else classifier_score
+            
+            interpolated_out = interpolation_fn(implicit_classifier_score, proj_out[0])
+
+            # VERBOSE: save classifier_score, implicit_classifier_score & proj_out
+            verbose = False
+            if verbose:
+                for yt, yval in enumerate(y):
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_grad_classifier', grad_classifier.cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_classifier_score', classifier_score.cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_implicit_classifier_score', implicit_classifier_score.cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_proj_out', proj_out[0].cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_consensus_region', proj_out[1].cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_interpolated_out', interpolated_out.cpu().numpy())
+
+            # proj_out = (interpolated_out, proj_out[1])
             
             # print(f"Proj out shape {proj_out[0].size()} with min {torch.min(proj_out[0])} and max {torch.max(proj_out[0])}")
 
@@ -815,7 +831,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
     def p_sample_ddim(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None, y=None,
-                      concept_conditions=None):
+                      concept_conditions=None, spatial=False):
         b, *_, device = *x.shape, x.device
 
         # print(f"p_sample_ddim concept_conditions: {concept_conditions}")
@@ -827,11 +843,11 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                                         unconditional_guidance_scale=unconditional_guidance_scale,
                                         unconditional_conditioning=unconditional_conditioning, y=y)
         else:
-            e_t = self.new_conditional_score(x=x, c=c, t=t, index=index, use_original_steps=use_original_steps,
+            e_t = self.concept_conditional_score(x=x, c=c, t=t, index=index, use_original_steps=use_original_steps,
                                         quantize_denoised=quantize_denoised,
                                         unconditional_guidance_scale=unconditional_guidance_scale,
                                         unconditional_conditioning=unconditional_conditioning, y=y,
-                                        concept_conditions=concept_conditions)
+                                        concept_conditions=concept_conditions, spatial=spatial)
 
         if score_corrector is not None:
             assert self.model.parameterization == "eps"
@@ -862,7 +878,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
 
     @torch.no_grad()
     def decode(self, x_latent, cond, t_start, y=None, unconditional_guidance_scale=1.0, unconditional_conditioning=None,
-               use_original_steps=False, latent_t_0=False, concept_conditions=None):
+               use_original_steps=False, latent_t_0=False, concept_conditions=None, spatial=False):
 
         timesteps = np.arange(self.ddpm_num_timesteps) if use_original_steps else self.ddim_timesteps
         timesteps = timesteps[:t_start]
@@ -905,7 +921,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
             x_dec, _ = self.p_sample_ddim(x_dec, cond, ts, index=index, use_original_steps=use_original_steps,
                                                 unconditional_guidance_scale=unconditional_guidance_scale,
                                             unconditional_conditioning=unconditional_conditioning, y=y,
-                                            concept_conditions=concept_conditions)
+                                            concept_conditions=concept_conditions, spatial=spatial)
             x_dec = x_dec.detach()
             for j in range(self.self_recurrence):
                 print("self recurrence")

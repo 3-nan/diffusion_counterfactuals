@@ -128,6 +128,7 @@ def main(cfg : DictConfig):
         concept_conditions = datadict['concept_conditions'][0]
         # print(concept_conditions)
         # layers = list(concept_conditions.keys())
+        # 'features.27', 'features.29'
         layers = ['features.22']
         # print(layers)
         concepts = concept_conditions['features.21'].cpu().numpy()

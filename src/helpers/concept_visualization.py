@@ -68,26 +68,28 @@ def crop_relevance_field(attr, img, rf=False, alpha=0.3, vis_th=0.2, crop_th=0.1
     img = zennit.image.imgify(img)
 
     if rf:
+        attr_rf = zennit.image.imgify(attr_rf, cmap='coldnhot', symmetric=True)
         return attr_rf, img
     else:
         return img
 
-def load_concept_attributions(concept_file, layer_name, concept_id):
+def load_concept_attributions(concept_file, layer_name, label, concept_id):
     """ Load the RelMax concepts for given concept_id.
         Additionally retrieve original image inputs.
     """
 
     with h5py.File(concept_file, "r", locking=False) as concept_dataset:
 
-        concept_group = concept_dataset[layer_name][str(concept_id)]
+        concept_group = concept_dataset[layer_name][str(label)][str(concept_id)]
+
         attrs = concept_group['attribution'][:]
         img_ids = concept_group['img_id'][:]
 
     return attrs, img_ids
 
-def show_concept_examples(dataset, concept_file, layer_name, concept_id):
+def show_concept_examples(dataset, concept_file, layer_name, label, concept_id):
 
-    attrs, img_ids = load_concept_attributions(concept_file, layer_name, concept_id)
+    attrs, img_ids = load_concept_attributions(concept_file, layer_name, label, concept_id)
 
     # Load images by img_ids
     img_samples = [dataset[ti][0] for ti in img_ids]
@@ -100,7 +102,7 @@ def show_concept_examples(dataset, concept_file, layer_name, concept_id):
         irfs.append(img_rf)
 
     # Form grid
-    fig, ax = plt.subplots(2, len(arfs))
+    fig, ax = plt.subplots(2, len(arfs), figsize=(18, 6))
 
     for a, arf in enumerate(arfs):
         ax[0, a].imshow(arf)
@@ -113,5 +115,6 @@ def show_concept_examples(dataset, concept_file, layer_name, concept_id):
             axax.set_xticks([])
             axax.set_yticks([])
     
-    fig.tight_layout()
+    # fig.tight_layout()
+    plt.subplots_adjust(wspace=0., hspace=0.)
     return fig

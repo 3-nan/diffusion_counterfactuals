@@ -2,16 +2,15 @@ import argparse
 import os
 # import psutil
 import yaml
-import json
 import copy
 import random
+import sys
+sys.path.append("./")
+sys.path.append("./ldce")
 
 # import matplotlib.pyplot as plt
 import numpy as np
 import pathlib
-import sys
-sys.path.append("./")
-sys.path.append("./ldce")
 
 
 import torch
@@ -23,28 +22,23 @@ from torch import autocast
 from omegaconf import OmegaConf, open_dict, DictConfig
 import hydra
 from hydra.utils import instantiate
-# from omegaconf import DictConfig, OmegaConf
 # import wandb
 import torchvision
 from torchvision import transforms, datasets
 from torchvision.utils import save_image
 
-# from src.clipseg.models.clipseg import CLIPDensePredT
-# try:
-#     from segment_anything import build_sam, SamPredictor
-# except:
-#     print("segment_anything not installed")
-# from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
-from ldce.sampling_helpers import disabled_train, get_model, _unmap_img
-# from ldce.sampling_helpers import load_model_hf
-# import json
+from src.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
+from src.sampling_helpers import load_model_hf
+import json
 
+from src.concept_conditioning import compute_concept_conditioning
 
 import sys
 import regex as re
-from ldce.ldm import *
+# from ldce.ldm import *
 # from ldce.ldm.models.diffusion.cc_ddim import CCMDDIMSampler
-from src.cc_ddim import ConceptCCMDDIMSampler as CCMDDIMSampler
+# from src.ldm.cc_ddim import CCMDDIMSampler
+from src.concept_cc_ddim import ConceptCCMDDIMSampler
 
 from ldce.data.imagenet_classnames import name_map, openai_imagenet_classes
 
@@ -58,10 +52,6 @@ from ldce.utils.preprocessor import Normalizer, CropAndNormalizer, ResizeAndNorm
 # from utils.vision_language_wrapper import VisionLanguageWrapper
 from ldce.utils.madry_net import MadryNet
 # from utils.dino_linear import LinearClassifier, DINOLinear
-
-from src.concept_extraction import compute_concept_conditioning
-from src.sampling import generate_samples
-
 
 def set_seed(seed: int = 0):
     torch.manual_seed(seed)
@@ -231,37 +221,18 @@ def main(cfg : DictConfig) -> None:
     # device = torch.device("cpu") # there seems to be a CUDA/autograd instability in gradient computation
     print(f"using device: {device}")
 
-    # if "seg_model" in cfg and cfg.seg_model is not None:
-    #     print("### Loading segmentation model ###")
-    #     if "name" in cfg.seg_model and cfg.seg_model.name == "clipseg":
-    #         model_seg = CLIPDensePredT(version=cfg.seg_model.version, reduce_dim=64) #int(cfg.seg_model.version.split('/')[-1]
-    #         model_seg.eval()
-    #         model_seg.load_state_dict(torch.load(cfg.seg_model.path, map_location=torch.device('cpu')), strict=False)
-    #     elif "name" in cfg.seg_model and cfg.seg_model.name == "GD_SAM":
-    #         detect_model = load_model_hf(repo_id=cfg.seg_model.dino.repo_id, filename= cfg.seg_model.dino.filename, dir = cfg.seg_model.dino.dir, ckpt_config_filename = cfg.seg_model.dino.ckpt_config_filename, device=device)
-    #         sam_checkpoint = os.path.join(cfg.pretrained_models_dir, 'sam_vit_h_4b8939.pth')
-    #         model_seg = SamPredictor(build_sam(checkpoint=sam_checkpoint).to(device))
-
     model = get_model(cfg_path=cfg.diffusion_model.cfg_path, ckpt_path = cfg.diffusion_model.ckpt_path).to(device).eval()
-    print("Model successfully loaded.")
     
     classifier_model = get_classifier(cfg, device)
     classifier_model.to(device).eval()
     classifier_model.train = disabled_train
-
-    print([f"{n}: {type(m)}" for n, m in classifier_model.named_modules() if isinstance(m, torch.nn.modules.conv.Conv2d)])
 
     ddim_steps = cfg.ddim_steps
     ddim_eta = cfg.ddim_eta
     scale = cfg.scale #for unconditional guidance
     strength = cfg.strength #for unconditional guidance
 
-    if "seg_model" not in cfg or cfg.seg_model is None or "name" not in cfg.seg_model:
-        sampler = CCMDDIMSampler(model, classifier_model, seg_model= None, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
-    elif cfg.seg_model.name == "clipseg":
-        sampler = CCMDDIMSampler(model, classifier_model, seg_model= model_seg, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
-    else:
-        sampler = CCMDDIMSampler(model, classifier_model, seg_model= model_seg, detect_model = detect_model, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
+    sampler = ConceptCCMDDIMSampler(model, classifier_model, seg_model= None, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
 
     sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=ddim_eta, verbose=False)
 
@@ -286,8 +257,10 @@ def main(cfg : DictConfig) -> None:
     
     #data_path = cfg.data_path
     dataset = get_dataset(cfg, last_data_idx=last_data_idx)
+    dataset = torch.utils.data.Subset(dataset, np.arange(1000))
+    print(type(dataset))
     print("dataset length: ", len(dataset))
-    data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=1)
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=4)
 
     if "ImageNet" in cfg.data._target_:
         i2h = name_map
@@ -314,8 +287,7 @@ def main(cfg : DictConfig) -> None:
         raise NotImplementedError
 
     if "ImageNet" in cfg.data._target_:
-        with open('data/synset_single_idx.yaml', 'r') as file:
-        # with open('data/synset_closest_idx.yaml', 'r') as file:
+        with open('data/synset_closest_idx.yaml', 'r') as file:
             synset_closest_idx = yaml.safe_load(file)
     # elif "Flowers102" in cfg.data._target_:
     #     with open("data/flowers_closest_indices.json") as file:
@@ -326,11 +298,8 @@ def main(cfg : DictConfig) -> None:
     #         closest_indices = json.load(file)
     #     closest_indices = {int(k):v for k,v in closest_indices.items()}
 
-    layer_name = 'features.27'
-
-    with open(os.path.join(cfg.output_dir, 'concept_selection', f'conditions_{layer_name}.json'), 'r') as conditions_file:
-        conditions = json.load(conditions_file)
-        # conditions = json.load(conditions_file)
+    concept_layer = cfg.concept_layer       # "backbone.features.29"
+    spatial = cfg.spatial
 
     if not cfg.resume:
         torch.save({"last_data_idx": -1}, checkpoint_path)
@@ -344,35 +313,20 @@ def main(cfg : DictConfig) -> None:
             set_seed(seed=cfg.get("seed", 0)) if cfg.fixed_seed else None
             seed = seed if cfg.fixed_seed else -1
             
-        if "cond_tgt_cls" in cfg.data and cfg.data.cond_tgt_cls:
-            image,label, tgt_classes, unique_data_idx = batch
-
-            print(tgt_classes)
-
-            tgts = []
-            concept_conditions = []
-            for udi in unique_data_idx:
-                udi_cond = conditions[str(udi.item())]
-                tgts.append(int(udi_cond['y']))
-                cond = {layer_name: udi_cond[layer_name][:4]}
-                concept_conditions.append(cond)
-
-            tgt_classes = torch.tensor(tgts).to(device)     #from_numpy(np.array(tgts)).to(device)
-
-            print(tgt_classes)
-        elif "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
+        if "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
             image, label, tgt_classes, unique_data_idx = batch
             tgt_classes = tgt_classes.to(device) #squeeze()
         else:
             image, label, unique_data_idx = batch
             if "ImageNet" in cfg.data._target_:
                 tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
-            # elif "CelebAHQDataset" in cfg.data._target_:
-            #     tgt_classes = (1 - label).type(torch.float32)
-            # elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
-            #     tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
+            elif "CelebAHQDataset" in cfg.data._target_:
+                tgt_classes = (1 - label).type(torch.float32)
+            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
+                tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
             else:
                 raise NotImplementedError
+
 
         image = image.to(device) #squeeze()
         label = label.to(device) #.item() #squeeze()
@@ -381,6 +335,14 @@ def main(cfg : DictConfig) -> None:
         #tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
         #shuffle tgt_classes
         #random.shuffle(tgt_classes)
+
+        # Compute concept conditions
+        # ToDo: add sampler.classifier_wrapper as parameter
+        if spatial:
+            conditions = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, spatial=spatial, cond_option=cfg.cond_option)
+        else:
+            conditions = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, cond_option=cfg.cond_option)
+
         #get classifcation prediction
         with torch.inference_mode():
             #with precision_scope():
@@ -401,11 +363,7 @@ def main(cfg : DictConfig) -> None:
         
         for j, l in enumerate(label):
             print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
-
-        # Compute concept conditioning
-        # concept_conditions = compute_concept_conditioning(sampler.classifier, image, 'features.21', tgt_classes)
-        print(f"Concept conditions: {concept_conditions}")
-
+        
         init_image = image.clone() #image.repeat(n_samples_per_class, 1, 1, 1).to(device)
         sampler.init_images = init_image.to(device)
         sampler.init_labels = label # n_samples_per_class * [label]
@@ -420,50 +378,50 @@ def main(cfg : DictConfig) -> None:
         if "txt" == model.cond_stage_key: # text-conditional
             if "ImageNet" in cfg.data._target_:
                 prompts = [f"a photo of a {openai_imagenet_classes[idx.item()]}." for idx in tgt_classes]
-            # elif "CelebAHQDataset" in cfg.data._target_:
-            #     # query label 31 (smile): label=0 <-> no smile and label=1 <-> smile
-            #     # query label 39 (age): label=0 <-> old and label=1 <-> young
-            #     assert cfg.data.query_label in [31, 39]
-            #     prompts = []
-            #     for target in tgt_classes:
-            #         if cfg.data.query_label == 31 and target == 0:
-            #             attr = "non-smiling"
-            #         elif cfg.data.query_label == 31 and target == 1:
-            #             attr = "smiling"
-            #         elif cfg.data.query_label == 39 and target == 0:
-            #             attr = "old"
-            #         elif cfg.data.query_label == 39 and target == 1:
-            #             attr = "young"
-            #         else:
-            #             raise NotImplementedError
-            #         prompts.append(f"a photo of a {attr} person")
-            # elif "OxfordIIIPets" in cfg.data._target_:
-            #     # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
-            #     prompts = [f"a photo of a {i2h[idx.item()]}, a type of pet." for idx in tgt_classes]
-            # elif "Flowers102" in cfg.data._target_:
-            #     # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
-            #     prompts = [f"a photo of a {i2h[idx.item()]}, a type of flower." for idx in tgt_classes]
+            elif "CelebAHQDataset" in cfg.data._target_:
+                # query label 31 (smile): label=0 <-> no smile and label=1 <-> smile
+                # query label 39 (age): label=0 <-> old and label=1 <-> young
+                assert cfg.data.query_label in [31, 39]
+                prompts = []
+                for target in tgt_classes:
+                    if cfg.data.query_label == 31 and target == 0:
+                        attr = "non-smiling"
+                    elif cfg.data.query_label == 31 and target == 1:
+                        attr = "smiling"
+                    elif cfg.data.query_label == 39 and target == 0:
+                        attr = "old"
+                    elif cfg.data.query_label == 39 and target == 1:
+                        attr = "young"
+                    else:
+                        raise NotImplementedError
+                    prompts.append(f"a photo of a {attr} person")
+            elif "OxfordIIIPets" in cfg.data._target_:
+                # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
+                prompts = [f"a photo of a {i2h[idx.item()]}, a type of pet." for idx in tgt_classes]
+            elif "Flowers102" in cfg.data._target_:
+                # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
+                prompts = [f"a photo of a {i2h[idx.item()]}, a type of flower." for idx in tgt_classes]
             else:
                 raise NotImplementedError
         else:
             prompts = None
         
         out = generate_samples(
-            model,
-            sampler,
-            tgt_classes,
-            ddim_steps,
-            scale,
+            model, 
+            sampler, 
+            tgt_classes, 
+            ddim_steps, 
+            scale, 
             init_latent=init_latent.to(device),
-            t_enc=t_enc,
-            init_image=init_image.to(device),
-            ccdddim=True,
+            t_enc=t_enc, 
+            init_image=init_image.to(device), 
+            ccdddim=True, 
             latent_t_0=cfg.get("latent_t_0", False),
-            prompts=prompts,
+            prompts=prompts, 
             seed=seed,
-            concept_conditions=concept_conditions,
+            conditions=conditions,
+            spatial=spatial,
         )
-        print("Samples generated successfully.")
 
         all_samples = out["samples"]
         all_videos = out["videos"] 
@@ -520,7 +478,6 @@ def main(cfg : DictConfig) -> None:
                 "in_tgt_confid": in_confid_tgt[j].cpu().item(), 
                 "closness_1": lp1, 
                 "closness_2": lp2,
-                "concept_conditions": concept_conditions,
             }
             if cfg.record_intermediate_results:
                 if all_videos is not None:

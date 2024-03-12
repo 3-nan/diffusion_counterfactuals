@@ -8,6 +8,7 @@ import zennit
 from zennit.core import RemovableHandle, RemovableHandleList
 
 from concept_extraction import _generate_hook
+from helpers.concepts import ChannelConcept
 
 
 class MaskHook:
@@ -62,37 +63,8 @@ def max_norm(attr, stabilize=1e-10):
     
     return attr / (attr.max() + stabilize)
 
-# @staticmethod
-def mask_map(batch_id: int, concept_ids: List, layer_name=None):
-    """
-    Wrapper that generates a function thath modifies the gradient (replaced by zennit by attributions).
 
-    Parameters:
-    ----------
-    batch_id: int
-        Specifies the batch dimension in the torch.Tensor.
-    concept_ids: list of integer values
-        integer lists corresponding to channel indices.
-
-    Returns:
-    --------
-    callable function that modifies the gradient
-    """
-
-    def mask_fct(grad):
-
-        mask = torch.zeros_like(grad[batch_id])
-        mask[concept_ids] = 1
-        grad[batch_id] = grad[batch_id] * mask
-
-        grad[batch_id] = max_norm(grad[batch_id])
-
-        return grad
-
-    return mask_fct
-
-
-def _append_recording_layer_hooks(model, record_layer):
+def _append_recording_layer_hooks(model, record_layer, start_layer=None):
 
     handles = []
     layer_out = {}
@@ -102,8 +74,8 @@ def _append_recording_layer_hooks(model, record_layer):
     #     if l_name not in record_l_names:
     #         record_l_names.append(l_name)
 
-    # if start_layer is not None and start_layer not in record_l_names:
-    #     record_l_names.append(start_layer)
+    if start_layer is not None and start_layer not in record_l_names:
+        record_l_names.append(start_layer)
 
     for name, layer in model.named_modules():
 
@@ -137,21 +109,59 @@ def _register_mask_fn(hook, mask_map, b_index, c_indices, l_name):
             raise ValueError("<mask_map> must be a dictionary or callable function.")
 
         hook.fn_list.append(mask_fn)
+        # hook.fn_list.append(max_norm)
 
+def get_concept_attribution(classifier_model, data, labels, layer_name, concept_id):
 
-def compute_concept_explanation(model, data, labels, layer_name, concept_id):
+    canonizers = [zennit.torchvision.VGGCanonizer()]
+
+    composite = zennit.composites.EpsilonPlus(canonizers=canonizers)
+    # composite = zennit.composites.EpsilonGammaBox(0., 1., gamma=0.1, canonizers=canonizers)
+
+    target = torch.eye(1000, device=data.device)[labels]
+
+    for n, m in classifier_model.named_modules():
+        if n == layer_name:
+            layer_handle = m
+
+    assert layer_handle
+
+    hook_ref = MaskHook([])
+    _register_mask_fn(hook_ref, ChannelConcept.mask, 0, [concept_id], layer_name)
+    # layer_handle.register_hook
+
+    name_map = [([layer_name], hook_ref)]
+
+    mask_composite = zennit.composites.NameLayerMapComposite(
+                layer_map=composite.layer_map,
+                name_map=name_map,
+                canonizers=composite.canonizers,
+            )
+
+    with zennit.attribution.Gradient(classifier_model, composite=mask_composite) as attributor:
+
+        pred, rels = attributor(data, target)
+
+    return rels.detach().cpu()
+
+def compute_concept_explanation(model, data, labels, layer_name, concept_id, rf_neurons=None):
     """ Compute CRP explanations. """
 
     target = torch.eye(1000, device=data.device)[labels]
 
-    # with zennit.attribution.Gradient(model, composite=None) as attributor:
+    # Define condition  # concept and target
+    if rf_neurons is not None:
+        start_layer = layer_name
+        conditions = [{layer_name: {concept_id: n_index}} for n_index in rf_neurons]
 
-    #     out, rel = attributor(data, target)
-
-
-    # Define condition
-    # conditions = None   # concept and target
-    conditions = [{layer_name: concept_id}]
+        mask_map = ChannelConcept.mask_rf
+        # attr = self.attribution(data, conditions, composite, mask_map=ChannelConcept.mask_rf, start_layer=layer_name, on_device=data.device, 
+        #             exclude_parallel=False)
+        # init_rel = None
+    else:
+        start_layer = None
+        conditions = [{layer_name: concept_id}]
+        mask_map = ChannelConcept.mask
 
     hook_map, y_targets, cond_l_names = {}, [], []
     for i, cond in enumerate(conditions):
@@ -165,13 +175,14 @@ def compute_concept_explanation(model, data, labels, layer_name, concept_id):
             if l_name not in cond_l_names:
                 cond_l_names.append(l_name)
 
-    handles, layer_out = _append_recording_layer_hooks(model, cond_l_names)
+    handles, layer_out = _append_recording_layer_hooks(model, cond_l_names, start_layer=start_layer)
 
     name_map = [([name], hook) for name, hook in hook_map.items()]
     # cmask_composite = zennit.composites.NameMapComposite(name_map)
 
     # if composite is None:
-    composite = zennit.composites.EpsilonPlusFlat(canonizers=[zennit.torchvision.VGGCanonizer()])
+    canonizers = [zennit.torchvision.VGGCanonizer()]
+    composite = zennit.composites.EpsilonGammaBox(0., 1., gamma=0.1, canonizers=canonizers)
 
     mask_composite = zennit.composites.NameLayerMapComposite(
                 layer_map=composite.layer_map,
@@ -179,9 +190,24 @@ def compute_concept_explanation(model, data, labels, layer_name, concept_id):
                 canonizers=composite.canonizers,
             )
 
-    with zennit.attribution.Gradient(model, composite=mask_composite) as attributor:
+    data.requires_grad = True
+    with zennit.attribution.Gradient(model, composite=mask_composite, retain_graph=True) as attributor:
 
-        out, rel = attributor(data, target)
+        if start_layer:
+            out, rel = attributor(data, target)
+
+            pred = layer_out[start_layer]
+
+            # grad_mask = self.relevance_init(pred.detach().clone(), None, init_rel)
+            if start_layer in cond_l_names:
+                cond_l_names.remove(start_layer)
+            # self.backward(pred, pred.detach(), exclude_parallel, cond_l_names, layer_out)
+            torch.autograd.backward(pred, pred.detach().clone().to(pred), retain_graph=False)
+
+            rel = data.grad.detach()
+
+        else:
+            out, rel = attributor(data, target)
 
     attribution = rel.cpu().sum(1)
     # with mask_composite.context(model), composite.context(model) as modified:

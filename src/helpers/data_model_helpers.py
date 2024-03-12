@@ -27,7 +27,7 @@ def get_classifier(cfg, device):
     return classifier_model
 
 # Data helpers
-def get_dataset(cfg, last_data_idx: int = 0):
+def get_dataset(cfg, last_data_idx: int = 0, base=False):
     if "ImageNet" in cfg.data._target_:
         out_size = 256
         transform_list = [
@@ -35,7 +35,11 @@ def get_dataset(cfg, last_data_idx: int = 0):
             transforms.ToTensor()
         ]
         transform = transforms.Compose(transform_list)
-        dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
+
+        if base:
+            dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
+        else:
+            dataset = instantiate(cfg.cf_data, start_sample=cfg.cf_data.start_sample, end_sample=cfg.cf_data.end_sample, transform=transform, restart_idx=last_data_idx)
     # elif "CelebAHQDataset" in cfg.data._target_:
     #     dataset = instantiate(
     #         cfg.data,
