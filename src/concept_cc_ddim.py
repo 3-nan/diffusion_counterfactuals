@@ -507,17 +507,19 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
             if self.classifier_lambda != 0:
 
                 # add conditions for masking
-                # conditions = [{'layer3.5.conv1': range(40)}]
                 x = _map_img(pred_x0)
                 if not self.classifier_wrapper: # only works for ImageNet!
                     x = tf.center_crop(x, 224)
                     x = normalize(x)
                 # conditions = compute_concept_conditioning(self.classifier, x, 'features.2', y)
+                    
+                # print(f'time step {t}')
 
                 with torch.enable_grad():
 
                     hook_map, y_targets = {}, []
 
+                    # if t[0].item() >= 50:                               # TEST THIS FIRST
                     for key in concept_conditions.keys():
                         if key not in hook_map:
                             hook_map[key] = MaskHook([])
@@ -582,10 +584,6 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
 
                     # grad_classifier2 = torch.autograd.grad(log_probs[0].sum(), x_noise, retain_graph=False)[0]
 
-                        # print(f"Log probs shape: {log_probs.size()}, x_noise: {x_noise.size()}")
-                #         print(f"Grad classifier shape: {grad_classifier.size()}")
-
-
         implicit_classifier_score = (e_t - e_t_uncond)  # .detach()
         # check gradient tracking on implicit_classifier_score
         assert implicit_classifier_score.requires_grad == False, "implicit_classifier_score requires grad"
@@ -622,6 +620,8 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_proj_out', proj_out[0].cpu().numpy())
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_consensus_region', proj_out[1].cpu().numpy())
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_interpolated_out', interpolated_out.cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_et', e_t.cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_et_uncond', e_t_uncond.cpu().numpy())
 
             # proj_out = (interpolated_out, proj_out[1])
             

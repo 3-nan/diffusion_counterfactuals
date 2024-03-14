@@ -10,10 +10,13 @@ intermediate_layers:
   - features.37
   - features.40
 
-attribution_file_path: /results/counterfactuals/data_representation/imagenet_acts_base.h5
+attribution_file_path: /results/counterfactuals/data_representation/imagenet_rels_base.h5
+cf_attr_file_path: /results/counterfactuals/data_representation/imagenet_rels_cf.h5
+cf_gen_attr_file_path: /results/counterfactuals/data_representation/imagenet_rels_cf_gen.h5
+
 analysis_file_path: /results/counterfactuals/data_representation/analysis.h5
 
-cf_attr_file_path: /results/counterfactuals/data_representation/imagenet_acts_cf.h5
+counterfactuals_dir: /results/counterfactuals/imagenet_vgg16bn_concept_20/bucket_0_10/counterfactual/
 
 data:
   _target_: data.datasets.ImageNet

@@ -2,6 +2,9 @@
 import sys
 import hydra
 from hydra.utils import instantiate
+import numpy as np
+import random
+import torch
 import torchvision
 from torchvision import transforms, datasets
 
@@ -9,6 +12,12 @@ from torchvision import transforms, datasets
 from ldce.utils.madry_net import MadryNet
 from ldce.utils.preprocessor import Crop, CropAndNormalizer
 
+
+def set_seed(seed: int = 0):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 # Model helpers
 def get_classifier(cfg, device):
@@ -38,8 +47,10 @@ def get_dataset(cfg, last_data_idx: int = 0, base=False):
 
         if base:
             dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
-        else:
+        elif 'cf_data' in cfg:
             dataset = instantiate(cfg.cf_data, start_sample=cfg.cf_data.start_sample, end_sample=cfg.cf_data.end_sample, transform=transform, restart_idx=last_data_idx)
+        else:
+            dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
     # elif "CelebAHQDataset" in cfg.data._target_:
     #     dataset = instantiate(
     #         cfg.data,

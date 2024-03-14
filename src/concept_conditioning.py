@@ -12,7 +12,7 @@ def store_hook(module, input, output):
     # keep the output tensor gradient, even if it is not a leaf-tensor
     output.retain_grad()
 
-def compute_concept_conditioning(model, image, target, layer_name, num_concepts=20, spatial=False, cond_option='sumabs'):
+def compute_concept_conditioning(model, image, target, layer_name, num_concepts=20, spatial=False, cond_option='sumabs', return_gradient=False):
     """ Compute concept conditioning. """
 
     print(f'image min: {torch.min(image)} and max {torch.max(image)}')
@@ -55,25 +55,55 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
         channel_grads = grad.cpu().sum((2,3)).numpy()
         conditions = [np.argsort(np.abs(cg))[-num_concepts:] for cg in channel_grads]
         conditions = np.array(conditions)
+
+        diff = []
+        for conds, cgrads in zip(conditions, channel_grads):
+            diff.append(cgrads[conds])
+        diff = np.array(diff)
+
+    elif cond_option == "sumequal":
+        nce = int(num_concepts / 2)
+        channel_grads = grad.cpu().sum((2,3)).numpy()
+        conditions = [np.concatenate((np.argsort(cg)[:nce], np.argsort(cg)[-nce:])) for cg in channel_grads]
+        conditions = np.array(conditions)
+
+        diff = []
+        for conds, cgrads in zip(conditions, channel_grads):
+            diff.append(cgrads[conds])
+        diff = np.array(diff)
     
     elif cond_option == "absmean":
         channel_grads = grad.cpu().abs().mean((2,3)).numpy()
         conditions = [np.argsort(cg)[-num_concepts:] for cg in channel_grads]
         conditions = np.array(conditions)
+        # diff = grad.cpu().mean((2,3)).numpy()[conditions]
+        diff = []
+        for conds, cgrads in zip(conditions, grad.cpu().mean((2,3)).numpy()):
+            diff.append(cgrads[conds])
+        diff = np.array(diff)
 
     elif cond_option == "abssum":
         channel_grads = grad.cpu().abs().sum((2,3)).numpy()
         conditions = [np.argsort(cg)[-num_concepts:] for cg in channel_grads]
         conditions = np.array(conditions)
+        # diff = grad.cpu().sum((2,3)).numpy()[conditions]
+        diff = []
+        for conds, cgrads in zip(conditions, grad.cpu().sum((2,3)).numpy()):
+            diff.append(cgrads[conds])
+        diff = np.array(diff)
 
     elif cond_option == "absmax":
         channel_grads = grad.cpu().abs().amax(dim=(2,3)).numpy()
         conditions = [np.argsort(cg)[-num_concepts:] for cg in channel_grads]
         conditions = np.array(conditions)
+        diff = []
+        for conds, cgrads in zip(conditions, channel_grads):
+            diff.append(cgrads[conds])
+        diff = np.array(diff)
+
 
     else:
         raise NotImplementedError
-
 
     if spatial:
         # Spatial filtering
@@ -87,9 +117,14 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
                 spatial_cond_mask[s, cond, :, :] = (grad[s, cond, :, :].abs() >= th)
         
         print(f'Spatial cond mask size: {spatial_cond_mask.size()}')
-        return {layer_name: spatial_cond_mask}
+        if return_gradient:
+            return {layer_name: spatial_cond_mask}, {layer_name: conditions}, diff, grad.cpu().numpy()
+        else:
+            return {layer_name: spatial_cond_mask}, {layer_name: conditions}, diff
 
     print(conditions)
     print(f'Condition shape: {conditions.shape}')
-
-    return {layer_name: conditions}
+    if return_gradient:
+        return {layer_name: spatial_cond_mask}, {layer_name: conditions}, diff, grad.cpu().numpy()
+    else:
+        return {layer_name: conditions}, {layer_name: conditions}, diff

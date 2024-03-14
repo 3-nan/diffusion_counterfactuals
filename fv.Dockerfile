@@ -37,9 +37,11 @@ RUN export HDF5_USE_FILE_LOCKING='FALSE'
 
 COPY configs/ ./configs
 COPY data/ ./data
-# COPY models/ ./models
+COPY models/ ./models
 COPY run_ldce_baseline.py ./run_ldce_baseline.py
 COPY src/ ./src
 COPY crp/ ./crp
 
-CMD ["python", "crp/run_feature_visualization.py"]
+# CMD ["python", "crp/run_feature_visualization.py"]
+# CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_concept"]
+CMD ["python", "src/visualization/visualize_conditioning.py", "--config-name=v1_concept"]

@@ -339,9 +339,9 @@ def main(cfg : DictConfig) -> None:
         # Compute concept conditions
         # ToDo: add sampler.classifier_wrapper as parameter
         if spatial:
-            conditions = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, spatial=spatial, cond_option=cfg.cond_option)
+            conditions, concept_conds, concept_diff = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, spatial=spatial, cond_option=cfg.cond_option)
         else:
-            conditions = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, cond_option=cfg.cond_option)
+            conditions, concept_conds, concept_diff = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, cond_option=cfg.cond_option)
 
         #get classifcation prediction
         with torch.inference_mode():
@@ -478,6 +478,8 @@ def main(cfg : DictConfig) -> None:
                 "in_tgt_confid": in_confid_tgt[j].cpu().item(), 
                 "closness_1": lp1, 
                 "closness_2": lp2,
+                "conditions": concept_conds[concept_layer][j],
+                "concept_diff": concept_diff[j],
             }
             if cfg.record_intermediate_results:
                 if all_videos is not None:

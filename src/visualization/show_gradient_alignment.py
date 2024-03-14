@@ -36,7 +36,7 @@ def create_gif(img_id=0, param='proj_out', same_scale=True):
     
     if param == "implicit_classifier_score" or same_scale:
         ax.set_zlim(-0.1, 0.1)
-    else:
+    elif not param.startswith('et'):
         ax.set_zlim(-0.015, 0.015)
 
     time_text = plt.title(f"Frame: 0")
@@ -53,7 +53,7 @@ def create_gif(img_id=0, param='proj_out', same_scale=True):
 
         if param == "implicit_classifier_score" or same_scale:
             ax.set_zlim(-0.1, 0.1)
-        else:
+        elif not param.startswith('et'):
             ax.set_zlim(-0.015, 0.015)
 
         ax.set_title(f"Frame: {frame}")
@@ -77,9 +77,13 @@ def create_gif(img_id=0, param='proj_out', same_scale=True):
 def main():
 
     for img_id in range(4):
-        for param in ['proj_out', 'classifier_score', 'implicit_classifier_score', 'grad_classifier', 'interpolated_out']:
+        for param in ['proj_out', 'classifier_score', 'implicit_classifier_score', 'grad_classifier', 'et', 'et_uncond']:
 
-            create_gif(img_id=img_id, param=param)
+            print(param)
+            if param.startswith('et'):
+                create_gif(img_id=img_id, param=param, same_scale=False)
+            else:
+                create_gif(img_id=img_id, param=param, same_scale=True)
 
 if __name__ == '__main__':
     main()

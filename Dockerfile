@@ -55,18 +55,20 @@ COPY run_evaluation.py ./run_evaluation.py
 COPY test_stuff.py ./test_stuff.py
 
 # CMD ["python", "run_ldce_baseline.py", "--config-name=v1_original"]
-CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
+# CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
 
 # CMD ["python", "src/evaluation/compute_fid.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline"]
 # CMD ["python", "src/evaluation/compute_validity_metrics.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline", "--target-model=resnet50"]
-# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_concept_spatial37_12"]
+# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_concept_20"]
 
 # CMD ["python", "src/clustering/compute_clustering.py", "--config-name=v1_cluster"]
 # CMD ["python", "src/concept_analysis.py", "--config-name=v1_concept"]
 # CMD ["python", "src/visualization/show_gradient_alignment.py"]
+CMD ["python", "src/write_conditioning.py", "--config-name=v1_concept"]
 
 # CMD ["python", "run_ldce.py", "--config-name=v1_wider"]
 # CMD ["python", "src/encode_dataset.py", "--config-name=v1_cluster"]
+# CMD ["python", "src/encode_counterfactuals.py", "--config-name=v1_cluster"]
 # CMD ["python", "src/concept_maximization.py", "--config-name=v1_wider"]
 # CMD ["python", "src/target_selection.py", "--config-name=v1_wider"]
 # CMD ["python", "src/sample_visualization.py", "--config-name=v1_wider"]

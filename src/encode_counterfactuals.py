@@ -11,6 +11,7 @@ import hydra
 import h5py
 import numpy as np
 from omegaconf import DictConfig
+from PIL import Image
 import torch
 # import torchvision
 # from torchvision import transforms
@@ -25,6 +26,12 @@ from ldce.sampling_helpers import normalize
 from representations import compute_layer_attributions
 from helpers.data_model_helpers import get_classifier, get_dataset
 
+
+def pil_loader(path: str) -> Image.Image:
+    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
+    with open(path, "rb") as f:
+        img = Image.open(f)
+        return img.convert("RGB")
 
 def set_seed(seed: int = 0):
     torch.manual_seed(seed)
@@ -162,140 +169,131 @@ def append_attributions_to_attribution_database(
 def main(cfg : DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    for base in [True, False]:
+    # for base in [True, False]:
 
-        # Settings
-        results_path = os.path.join(cfg.output_dir, "data_representation")
-        os.makedirs(results_path, exist_ok=True)
+    counterfactuals_dir = cfg.counterfactuals_dir
 
-        if base:
-            activations_file_path = os.path.join(results_path, 'imagenet_acts_base.h5')
-            attributions_file_path = os.path.join(results_path, 'imagenet_rels_base.h5')
-        else:
-            activations_file_path = os.path.join(results_path, 'imagenet_acts_cf.h5')
-            attributions_file_path = os.path.join(results_path, 'imagenet_rels_cf.h5')
+    # Settings
+    results_path = os.path.join(cfg.output_dir, "data_representation")
+    os.makedirs(results_path, exist_ok=True)
 
-        if os.path.exists(activations_file_path):
-            os.remove(activations_file_path)
-        if os.path.exists(attributions_file_path):
-            os.remove(attributions_file_path)
+    # if base:
+    #     activations_file_path = os.path.join(results_path, 'imagenet_acts_base.h5')
+    #     attributions_file_path = os.path.join(results_path, 'imagenet_rels_base.h5')
+    # else:
+    activations_file_path = os.path.join(results_path, 'imagenet_acts_cf_gen.h5')
+    attributions_file_path = os.path.join(results_path, 'imagenet_rels_cf_gen.h5')
 
-        # Load model
-        classifier_model = get_classifier(cfg, device)
-        classifier_model.to(device).eval()
-        # classifier_model.train = disabled_train
-        print([f"{n}: {type(m)}" for n,m in classifier_model.named_modules()])
+    if os.path.exists(activations_file_path):
+        os.remove(activations_file_path)
+    if os.path.exists(attributions_file_path):
+        os.remove(attributions_file_path)
 
-        # Load dataset
-        # n_samples_per_class = cfg.n_samples_per_class
-        batch_size = 32 # cfg.data.batch_size
-        # shuffle = cfg.get("shuffle", False)
+    # Load model
+    classifier_model = get_classifier(cfg, device)
+    classifier_model.to(device).eval()
+    # classifier_model.train = disabled_train
+    print([f"{n}: {type(m)}" for n,m in classifier_model.named_modules()])
 
-        print(f'{cfg.data.start_sample} -> {cfg.data.end_sample}')
-        last_data_idx = 0
-        dataset = get_dataset(cfg, last_data_idx=last_data_idx, base=base)
-        print(type(dataset))
-        print("dataset length: ", len(dataset))
-        data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=1)
+    # Load dataset
+    # n_samples_per_class = cfg.n_samples_per_class
+    batch_size = 32 # cfg.data.batch_size
+    # shuffle = cfg.get("shuffle", False)
 
-        # Iterate dataset (max 100 samples per class?)
+    print(f'{cfg.data.start_sample} -> {cfg.data.end_sample}')
+    last_data_idx = 0
+    dataset = get_dataset(cfg, last_data_idx=last_data_idx, base=False)
+    print(type(dataset))
+    print("dataset length: ", len(dataset))
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=1)
 
-        for i, batch in enumerate(tqdm(data_loader)):
+    # Iterate dataset (max 100 samples per class?)
 
-            if "fixed_seed" in cfg:
-                set_seed(seed=cfg.get("seed", 0)) if cfg.fixed_seed else None
-                seed = seed if cfg.fixed_seed else -1
-                
-            if "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
-                image, label, tgt_classes, unique_data_idx = batch
-                tgt_classes = tgt_classes.to(device) #squeeze()
-            else:
-                image, label, unique_data_idx = batch
-                if "ImageNet" in cfg.data._target_:
-                    tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
-                # elif "CelebAHQDataset" in cfg.data._target_:
-                #     tgt_classes = (1 - label).type(torch.float32)
-                # elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
-                #     tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
-                else:
-                    raise NotImplementedError
+    for i, batch in enumerate(tqdm(data_loader)):
 
-            print(unique_data_idx)
-
-            # use unique data idx to load counterfactuals
-
-            # encode counterfactuals
-
-            raise ValueError
-            image = image.to(device)
-            label = label.to(device)
-            #shuffle tgt_classes
-            #random.shuffle(tgt_classes)
-            #get classifcation prediction
-            with torch.inference_mode():
-                #with precision_scope():
-                if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
-                    logits = classifier_model(image)
-                else:
-                    # logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
-                    # x = _map_img(x)
-                    x = image
-                    if "classifier_wrapper" not in cfg.classifier_model: # only works for ImageNet!
-                        x = tf.center_crop(x, 224)
-                        x = normalize(x)
-                    logits = classifier_model(x)
-                # TODO: handle binary vs multi-class
-                if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_: # multi-class
-                    in_class_pred = logits.argmax(dim=1)
-                    in_confid = logits.softmax(dim=1).max(dim=1).values
-                    # in_confid_tgt =  logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
-                else: # binary
-                    in_class_pred = (logits >= 0).type(torch.int8)
-                    in_confid = torch.where(logits >= 0, logits.sigmoid(), 1 - logits.sigmoid())
-                    # in_confid_tgt =  torch.where(tgt_classes.to(device) == 0, 1 - logits.sigmoid(), logits.sigmoid())
-                # print("in class_pred: ", in_class_pred, in_confid)
+        if "fixed_seed" in cfg:
+            set_seed(seed=cfg.get("seed", 0)) if cfg.fixed_seed else None
+            seed = seed if cfg.fixed_seed else -1
             
-            # for j, l in enumerate(label):
-            #     print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
+        if "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
+            image, label, tgt_classes, unique_data_idx = batch
+            tgt_classes = tgt_classes.to(device) #squeeze()
+        else:
+            image, label, unique_data_idx = batch
+            if "ImageNet" in cfg.data._target_:
+                tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
+            # elif "CelebAHQDataset" in cfg.data._target_:
+            #     tgt_classes = (1 - label).type(torch.float32)
+            # elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
+            #     tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
+            else:
+                raise NotImplementedError
 
-            # Optional: Compute intermediate activation
+        # Load generated counterfactual images
+        file_paths = [os.path.join(counterfactuals_dir, f'{str(udx).zfill(5)}.png') for udx in unique_data_idx.numpy()]
 
-            # Compute intermediate attributions
-            # print(in_class_pred)
-            # inter_layers = ['features.14',
-            #                 'features.17',
-            #                 'features.19',
-            #                 'features.21',
-            #                 'features.24',
-            #                 'features.26',
-            #                 'features.28']
-            inter_layers = cfg.intermediate_layers
-            # inter_layers = ['features.15',
-            #                 'features.18',
-            #                 'features.20',
-            #                 'features.22',
-            #                 'features.25',
-            #                 'features.27',
-            #                 'features.29']
 
-            acts, norm_acts, attrs, norm_attrs, rf_neurons = compute_layer_attributions(classifier_model, image, in_class_pred, layers=inter_layers)
+        cf_imgs = [dataset.transform(pil_loader(fp)) for fp in file_paths]
+        cf_imgs = torch.stack(cf_imgs, dim=0)
 
-            # Save representations in h5py
-            append_attributions_to_attribution_database(
-                activations_file_path,
-                acts,
-                norm_acts,
-                rf_neurons,
-                np.array(in_class_pred.cpu()),
-                np.array(label.cpu()))
+        # encode counterfactuals
+        image = cf_imgs
+        label = tgt_classes
 
-            append_attributions_to_attribution_database(
-                attributions_file_path,
-                attrs,
-                norm_attrs,
-                rf_neurons,
-                np.array(in_class_pred.cpu()),
-                np.array(label.cpu()))
+        # raise ValueError
+        image = image.to(device)
+        label = label.to(device)
+
+        #get classifcation prediction
+        with torch.inference_mode():
+            #with precision_scope():
+            if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
+                logits = classifier_model(image)
+            else:
+                # logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
+                # x = _map_img(x)
+                x = image
+                if "classifier_wrapper" not in cfg.classifier_model: # only works for ImageNet!
+                    x = tf.center_crop(x, 224)
+                    x = normalize(x)
+                logits = classifier_model(x)
+            # TODO: handle binary vs multi-class
+            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_: # multi-class
+                in_class_pred = logits.argmax(dim=1)
+                in_confid = logits.softmax(dim=1).max(dim=1).values
+                # in_confid_tgt =  logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
+            else: # binary
+                in_class_pred = (logits >= 0).type(torch.int8)
+                in_confid = torch.where(logits >= 0, logits.sigmoid(), 1 - logits.sigmoid())
+                # in_confid_tgt =  torch.where(tgt_classes.to(device) == 0, 1 - logits.sigmoid(), logits.sigmoid())
+            # print("in class_pred: ", in_class_pred, in_confid)
+        
+        # for j, l in enumerate(label):
+        #     print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
+
+        # Optional: Compute intermediate activation
+
+        # Compute intermediate attributions
+        inter_layers = cfg.intermediate_layers
+
+        acts, norm_acts, attrs, norm_attrs, rf_neurons = compute_layer_attributions(classifier_model, image, in_class_pred, layers=inter_layers)
+
+        # Save representations in h5py
+        append_attributions_to_attribution_database(
+            activations_file_path,
+            acts,
+            norm_acts,
+            rf_neurons,
+            np.array(in_class_pred.cpu()),
+            np.array(label.cpu()))
+
+        append_attributions_to_attribution_database(
+            attributions_file_path,
+            attrs,
+            norm_attrs,
+            rf_neurons,
+            np.array(in_class_pred.cpu()),
+            np.array(label.cpu()))
 
 if __name__ == "__main__":
     main()

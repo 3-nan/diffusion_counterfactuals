@@ -371,6 +371,8 @@ class CCMDDIMSampler(object):
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_implicit_classifier_score', implicit_classifier_score.cpu().numpy())
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_proj_out', proj_out[0].cpu().numpy())
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_consensus_region', proj_out[1].cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_et', e_t.cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_et_uncond', e_t_uncond.cpu().numpy())
 
             classifier_score = proj_out if self.cone_projection_type == "default" else proj_out[0].view_as(classifier_score)
             concensus_region = proj_out[1].unsqueeze(1) if self.cone_projection_type == "binning" else None
