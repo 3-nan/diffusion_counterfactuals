@@ -51,9 +51,10 @@ def get_dataset(cfg, last_data_idx: int = 0):
 
 
 
-def visualize_concepts(dataset, model, layer, concepts, concept_diff, uidx, base_label, cf_label, attr="relevance"):
+def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx, base_label, cf_label, attr="relevance"):
 
-    fv_path = '/results/counterfactuals/fv_imagenet_vgg16bn'
+    # fv_path = '/results/counterfactuals/fv_imagenet_vgg16bn'
+    fv_path = f'/results/counterfactuals/fv_imagenet_{cfg.classifier_model.name}'
 
 
     attribution = CondAttribution(model)
@@ -70,17 +71,18 @@ def visualize_concepts(dataset, model, layer, concepts, concept_diff, uidx, base
     fv = FeatureVisualization(attribution, dataset, layer_map, preprocess_fn=preprocessing, path=fv_path)
 
     # Visualize concepts
+    print(concepts)
 
     ref_c = fv.get_max_reference(concepts, layer, attr, (0, 8), composite=composite, plot_fn=None)
     plot_grid(ref_c, figsize=(6, 9))
 
-    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{str(uidx).zfill(5)}_ref_{attr}_concept.png'))
-    plt.close()
+    # plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{str(uidx).zfill(5)}_ref_{attr}_concept.png'))
+    # plt.close()
 
-    ref_c = fv.get_max_reference(concepts, layer, attr, (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
-    plot_grid(ref_c, figsize=(6, 5), padding=False)
-    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{str(uidx).zfill(5)}_ref_{attr}_concept_receptive.png'))
-    plt.close()
+    # ref_c = fv.get_max_reference(concepts, layer, attr, (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
+    # plot_grid(ref_c, figsize=(6, 5), padding=False)
+    # plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{str(uidx).zfill(5)}_ref_{attr}_concept_receptive.png'))
+    # plt.close()
 
     ref_t_all = {}
     for concept, c_diff in zip(concepts, concept_diff):
@@ -90,7 +92,7 @@ def visualize_concepts(dataset, model, layer, concepts, concept_diff, uidx, base
             ref_t = fv.get_stats_reference(concept, layer, [base_label], attr, (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
         ref_t_all.update(ref_t)
     plot_grid(ref_t_all, figsize=(6, 9), padding=False)
-    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{str(uidx).zfill(5)}_ref_{attr}_concept_class.png'))
+    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.png'))
     plt.close()
 
 
@@ -288,8 +290,38 @@ def main(cfg : DictConfig) -> None:
             dict_save_path = os.path.join(out_dir, f'{str(uidx).zfill(5)}.pth')
 
             data_dict = torch.load(dict_save_path)
-            conditions = data_dict['conditions']
-            concept_diff = data_dict['concept_diff']
+
+            if 'conditions' in data_dict:
+                conditions = data_dict['conditions']
+                concept_diff = data_dict['concept_diff']
+            else:
+                print('Recomputing conditions...')
+                # conditions = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, cond_option=cfg.cond_option)
+
+                def acts_hook(module, input, output):
+                    module.out = output
+
+                layer_handle = None
+                for n, m in classifier_model.named_modules():
+                    if n == cfg.concept_layer:
+                        layer_handle = m
+
+                layer_handle.register_forward_hook(acts_hook)
+                oc = classifier_model(image.to(device))
+                # print(oc)
+                
+                # for n, m in classifier_model.named_modules():
+                #     if n == cfg.concept_layer:
+                cout = layer_handle.out
+                # print(cout.size())
+
+                concs = cout.detach().cpu().sum((2,3)).abs().numpy()
+
+                conditions = [np.argsort(cg)[-cfg.num_concepts:] for cg in concs]
+                conditions = np.array(conditions)[j]
+
+                concept_diff = conditions #cout.detach().cpu().sum((2,3))[conditions]
+                print(conditions)
         
             if conditions.shape[0] > 6:
                 conditions = conditions[-6:]
@@ -297,8 +329,9 @@ def main(cfg : DictConfig) -> None:
             print(conditions)
             print(label[j].item())
             print(tgt_classes[j].item())
+            print(type(uidx))
 
-            visualize_concepts(ref_dataset, classifier_model, concept_layer, conditions, concept_diff, uidx, label[j].item(), tgt_classes[j].item(), attr=attr)
+            visualize_concepts(cfg, ref_dataset, classifier_model, concept_layer, conditions, concept_diff, uidx, label[j].item(), tgt_classes[j].item(), attr=attr)
 
 
 if __name__ == '__main__':

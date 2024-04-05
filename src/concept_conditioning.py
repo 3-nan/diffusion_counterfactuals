@@ -12,7 +12,7 @@ def store_hook(module, input, output):
     # keep the output tensor gradient, even if it is not a leaf-tensor
     output.retain_grad()
 
-def compute_concept_conditioning(model, image, target, layer_name, num_concepts=20, spatial=False, cond_option='sumabs', return_gradient=False):
+def compute_concept_conditioning(model, image, target, layer_name, num_concepts=20, spatial=False, spatial_th=0.4, cond_option='sumabs', return_gradient=False):
     """ Compute concept conditioning. """
 
     print(f'image min: {torch.min(image)} and max {torch.max(image)}')
@@ -54,6 +54,16 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
     if cond_option == "sumabs":
         channel_grads = grad.cpu().sum((2,3)).numpy()
         conditions = [np.argsort(np.abs(cg))[-num_concepts:] for cg in channel_grads]
+        conditions = np.array(conditions)
+
+        diff = []
+        for conds, cgrads in zip(conditions, channel_grads):
+            diff.append(cgrads[conds])
+        diff = np.array(diff)
+
+    elif cond_option == "sum":
+        channel_grads = grad.cpu().sum((2,3)).numpy()
+        conditions = [np.argsort(cg)[-num_concepts:] for cg in channel_grads]
         conditions = np.array(conditions)
 
         diff = []
@@ -112,7 +122,7 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
 
             for cond in conditions[s]:
 
-                th = grad[s, cond, :, :].abs().max() * 0.6
+                th = grad[s, cond, :, :].abs().max() * spatial_th
 
                 spatial_cond_mask[s, cond, :, :] = (grad[s, cond, :, :].abs() >= th)
         

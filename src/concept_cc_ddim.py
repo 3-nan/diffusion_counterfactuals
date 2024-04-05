@@ -608,6 +608,13 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                                             orig_shp=implicit_classifier_score.shape) \
                 if self.guidance == "projected" else classifier_score
             
+            # test this
+            # proj_out = projection_fn(classifier_score.view(x.shape[0], -1),
+            #                                 implicit_classifier_score.view(x.shape[0], -1),
+            #                                 self.deg_cone_projection,
+            #                                 orig_shp=implicit_classifier_score.shape) \
+            #     if self.guidance == "projected" else classifier_score
+            
             interpolated_out = interpolation_fn(implicit_classifier_score, proj_out[0])
 
             # VERBOSE: save classifier_score, implicit_classifier_score & proj_out
@@ -622,6 +629,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_interpolated_out', interpolated_out.cpu().numpy())
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_et', e_t.cpu().numpy())
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_et_uncond', e_t_uncond.cpu().numpy())
+                    np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_lp_grad', lp_grad.cpu().numpy())
 
             # proj_out = (interpolated_out, proj_out[1])
             

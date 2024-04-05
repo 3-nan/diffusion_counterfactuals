@@ -327,6 +327,18 @@ def main(cfg : DictConfig) -> None:
             else:
                 raise NotImplementedError
 
+        if "counterfactual_target" in cfg:
+            if cfg.counterfactual_target == "baseline":
+                tgt_json = os.path.join('/results/counterfactuals/', 'concept_selection', f'conditions_{cfg.classifier_model.name}_{cfg.counterfactual_target}.json')
+            elif cfg.target_norm:
+                tgt_json = os.path.join('/results/counterfactuals/', 'concept_selection', f'conditions_{cfg.classifier_model.name}_{cfg.concept_layer}_{cfg.counterfactual_target}_norm.json')
+            else:
+                tgt_json = os.path.join('/results/counterfactuals/', 'concept_selection', f'conditions_{cfg.classifier_model.name}_{cfg.concept_layer}_{cfg.counterfactual_target}.json')
+            with open(tgt_json) as f:
+                d = json.load(f)
+
+            tgt_classes = [d[str(uix.item())]['target'] for uix in unique_data_idx]
+            tgt_classes = torch.tensor(tgt_classes, dtype=torch.int64).to(device)
 
         image = image.to(device) #squeeze()
         label = label.to(device) #.item() #squeeze()

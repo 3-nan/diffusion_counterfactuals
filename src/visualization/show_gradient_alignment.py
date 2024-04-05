@@ -53,7 +53,7 @@ def create_gif(img_id=0, param='proj_out', same_scale=True):
 
         if param == "implicit_classifier_score" or same_scale:
             ax.set_zlim(-0.1, 0.1)
-        elif not param.startswith('et'):
+        elif not param.startswith('et') and not param.startswith('lp'):
             ax.set_zlim(-0.015, 0.015)
 
         ax.set_title(f"Frame: {frame}")
@@ -69,7 +69,7 @@ def create_gif(img_id=0, param='proj_out', same_scale=True):
     # html = display.HTML(video)
     # display.display(html) 
 
-    anim_created.save(filename=f"/results/counterfactuals/class_grad_eval/{img_id}_{param}.gif", writer="pillow")
+    anim_created.save(filename=f"/results/counterfactuals/class_grad_eval/{str(img_id).zfill(5)}_{param}.gif", writer="pillow")
 
     # good practice to close the plt object.
     plt.close()
@@ -77,10 +77,11 @@ def create_gif(img_id=0, param='proj_out', same_scale=True):
 def main():
 
     for img_id in range(4):
-        for param in ['proj_out', 'classifier_score', 'implicit_classifier_score', 'grad_classifier', 'et', 'et_uncond']:
+        params = ['proj_out', 'classifier_score', 'implicit_classifier_score', 'grad_classifier', 'et', 'et_uncond', 'lp_grad']
+        for param in ['lp_grad']:
 
             print(param)
-            if param.startswith('et'):
+            if param.startswith('et') or param.startswith('lp'):
                 create_gif(img_id=img_id, param=param, same_scale=False)
             else:
                 create_gif(img_id=img_id, param=param, same_scale=True)

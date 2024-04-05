@@ -169,11 +169,11 @@ def main(cfg : DictConfig) -> None:
         os.makedirs(results_path, exist_ok=True)
 
         if base:
-            activations_file_path = os.path.join(results_path, 'imagenet_acts_base.h5')
-            attributions_file_path = os.path.join(results_path, 'imagenet_rels_base.h5')
+            activations_file_path = os.path.join(results_path, f'imagenet_{cfg.classifier_model.name}_acts_base.h5')
+            attributions_file_path = os.path.join(results_path, f'imagenet_{cfg.classifier_model.name}_rels_base.h5')
         else:
-            activations_file_path = os.path.join(results_path, 'imagenet_acts_cf.h5')
-            attributions_file_path = os.path.join(results_path, 'imagenet_rels_cf.h5')
+            activations_file_path = os.path.join(results_path, f'imagenet_{cfg.classifier_model.name}_acts_cf.h5')
+            attributions_file_path = os.path.join(results_path, f'imagenet_{cfg.classifier_model.name}_rels_cf.h5')
 
         if os.path.exists(activations_file_path):
             os.remove(activations_file_path)

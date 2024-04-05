@@ -181,7 +181,7 @@ def main(cfg : DictConfig) -> None:
 
         # for layer in ['features.37', 'features.40']:
 
-        for cond_option in ['sumabs', 'sumequal', 'absmean', 'abssum', 'absmax']:
+        for cond_option in ['sumabs', 'sum', 'sumequal', 'absmean', 'abssum', 'absmax']:
 
         # Compute concept conditions
         # ToDo: add sampler.classifier_wrapper as parameter
@@ -193,7 +193,7 @@ def main(cfg : DictConfig) -> None:
             # Save conditioning to file
             print(unique_data_idx)
 
-            with h5py.File(conditioning_file, 'a') as cfile:
+            with h5py.File(conditioning_file, 'a', locking=False) as cfile:
 
                 if 'image' in cfile:
                     num_existing = cfile['image'].shape[0]

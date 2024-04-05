@@ -23,7 +23,7 @@ from ldce.sampling_helpers import normalize
 # from ldce.utils.madry_net import MadryNet
 # from ldce.utils.preprocessor import Crop, CropAndNormalizer
 
-from representations import compute_layer_attributions
+from src.latent_representation.representations import compute_layer_attributions
 from helpers.data_model_helpers import get_classifier, get_dataset
 
 

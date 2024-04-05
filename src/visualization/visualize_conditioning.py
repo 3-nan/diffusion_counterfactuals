@@ -45,7 +45,7 @@ def load_fv(dataset, model):
 
     return fv
 
-def plot_grid(ref_c: Dict[int, Any], cmap_dim=1, cmap="bwr", vmin=None, vmax=None, symmetric=True, resize=None, padding=True, figsize=(6, 6)):
+def plot_grid(ref_c: Dict[int, Any], cdiff, cmap_dim=1, cmap="bwr", vmin=None, vmax=None, symmetric=True, resize=None, padding=True, figsize=(6, 6)):
     """
     Plots dictionary of reference images as they are returned of the 'get_max_reference' method. To every element in the list crp.imgify is applied with its respective argument values.
 
@@ -111,7 +111,7 @@ def plot_grid(ref_c: Dict[int, Any], cmap_dim=1, cmap="bwr", vmin=None, vmax=Non
                 ax.set_yticks([])
 
                 if sr == 0 and c == 0:
-                    ax.set_ylabel(keys[i])
+                    ax.set_ylabel(f'{keys[i]}\n{cdiff[i]:.4f}')
 
                 fig.add_subplot(ax)
                 
@@ -131,22 +131,23 @@ def show_concepts(i, concept_layer, conditioning_file, fv, i2h):
 
         print(f'{str(i).zfill(5)}: {label} - {i2h[label]} --> {cf_label} - {i2h[cf_label]}')
 
-        for cond_option in ['sumabs', 'sumequal', 'absmean', 'abssum', 'absmax']:
-            conditions = cfile[concept_layer][cond_option]['concepts'][i].astype('int32')
-            concept_diff = cfile[concept_layer][cond_option]['diffs'][i]
+        for cond_option in ['sumabs', 'sum', 'sumequal', 'absmean', 'abssum', 'absmax']:
+            if cond_option in cfile[concept_layer]:
+                conditions = cfile[concept_layer][cond_option]['concepts'][i].astype('int32')
+                concept_diff = cfile[concept_layer][cond_option]['diffs'][i]
 
-            ref_c = fv.get_max_reference(conditions, concept_layer, 'relevance', (0, 8), composite=composite, plot_fn=None)
-            ref_t_all = {}
-            for concept, c_diff in zip(conditions, concept_diff):
-                if c_diff > 0:
-                    ref_t = fv.get_stats_reference(concept, concept_layer, [cf_label], 'relevance', (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
-                else:
-                    ref_t = fv.get_stats_reference(concept, concept_layer, [label], 'relevance', (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
-                ref_t_all.update(ref_t)
+                ref_c = fv.get_max_reference(conditions, concept_layer, 'relevance', (0, 8), composite=composite, plot_fn=None)
+                ref_t_all = {}
+                for concept, c_diff in zip(conditions, concept_diff):
+                    if c_diff > 0:
+                        ref_t = fv.get_stats_reference(concept, concept_layer, [cf_label], 'relevance', (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
+                    else:
+                        ref_t = fv.get_stats_reference(concept, concept_layer, [label], 'relevance', (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
+                    ref_t_all.update(ref_t)
 
-            plot_grid(ref_t_all, figsize=(6, 9), padding=False)
-            plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{str(i).zfill(5)}_concepts_{cond_option}.png'))
-            plt.close()
+                plot_grid(ref_t_all, concept_diff, figsize=(6, 9), padding=False)
+                plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{str(i).zfill(5)}_concepts_{cond_option}.png'))
+                plt.close()
 
 
 @hydra.main(version_base=None, config_path="../../configs/ldce", config_name="v1")
@@ -213,7 +214,7 @@ def main(cfg : DictConfig) -> None:
     ref_cfg = OmegaConf.create(ref_cfg_dict)
     ref_dataset = get_dataset(ref_cfg)
 
-    concept_layer = 'features.40'
+    concept_layer = cfg.concept_layer   # 'features.40'
 
     # Read h5py file
     conditioning_file = os.path.join(out_dir, f'conditioning_{cfg.classifier_model.name}.h5')
