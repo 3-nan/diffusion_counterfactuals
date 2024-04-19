@@ -39,6 +39,7 @@ import regex as re
 # from ldce.ldm.models.diffusion.cc_ddim import CCMDDIMSampler
 # from src.ldm.cc_ddim import CCMDDIMSampler
 from src.concept_cc_ddim import ConceptCCMDDIMSampler
+from src.resnet_concept_cc_ddim import ConceptCCMDDIMSampler as ResnetConceptCCMDDIMSampler
 
 from ldce.data.imagenet_classnames import name_map, openai_imagenet_classes
 
@@ -232,7 +233,10 @@ def main(cfg : DictConfig) -> None:
     scale = cfg.scale #for unconditional guidance
     strength = cfg.strength #for unconditional guidance
 
-    sampler = ConceptCCMDDIMSampler(model, classifier_model, seg_model= None, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
+    if cfg.classifier_model.name.startswith("resnet"):
+        sampler = ResnetConceptCCMDDIMSampler(model, classifier_model, seg_model= None, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
+    else:
+        sampler = ConceptCCMDDIMSampler(model, classifier_model, seg_model= None, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
 
     sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=ddim_eta, verbose=False)
 

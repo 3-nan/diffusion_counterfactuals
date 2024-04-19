@@ -2,21 +2,24 @@ output_dir: /results/counterfactuals/
 
 seg_model:
 classifier_model:
-  name: "vgg16_bn"      # vgg16   vgg16_bn
+  name: "resnet18"      # vgg16   vgg16_bn
 
-concept_layer: features.37    # 29  # 40
+concept_layer: layer4.1.conv1 # features.37    # 29  # 40
 
 intermediate_layers:
-  - features.37
-  - features.40
+  # - features.37
+  # - features.40
+  - layer4.0.conv1
+  - layer4.1.conv1
 
-attribution_file_path: /results/counterfactuals/data_representation/imagenet_rels_base.h5
-cf_attr_file_path: /results/counterfactuals/data_representation/imagenet_rels_cf.h5
-cf_gen_attr_file_path: /results/counterfactuals/data_representation/imagenet_rels_cf_gen.h5
+# attribution_file_path: /results/counterfactuals/data_representation/imagenet_rels_base.h5
+attribution_file_path: /results/counterfactuals/data_representation/imagenet_resnet18_actattr_base.h5
+cf_attr_file_path: /results/counterfactuals/data_representation/imagenet_resnet18_acts_cf.h5
+cf_gen_attr_file_path: /results/counterfactuals/data_representation/imagenet_resnet18_acts_cf_gen.h5
 
-analysis_file_path: /results/counterfactuals/data_representation/analysis.h5
+analysis_file_path: /results/counterfactuals/data_representation/analysis_resnet18.h5
 
-counterfactuals_dir: /results/counterfactuals/imagenet_vgg16bn_concept_20/bucket_0_10/counterfactual/
+counterfactuals_dir: /results/counterfactuals/imagenet_resnet18_concept_10/bucket_0_10/counterfactual/
 
 data:
   _target_: data.datasets.ImageNet

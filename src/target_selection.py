@@ -259,11 +259,11 @@ def get_local_target(cfg, unique_data_idx, output_dir, attribute='activation', n
 
     # Get reference dataset
     if attribute == 'activation':
-        acts_base_file_path = os.path.join(output_dir, 'data_representation', 'imagenet_acts_base.h5')
+        acts_base_file_path = os.path.join(output_dir, 'data_representation', f'imagenet_{cfg.classifier_model.name}_acts_base.h5')
     elif attribute == 'attribution':
-        acts_base_file_path = os.path.join(output_dir, 'data_representation', 'imagenet_rels_base.h5')
+        acts_base_file_path = os.path.join(output_dir, 'data_representation', f'imagenet_{cfg.classifier_model.name}_rels_base.h5')
     elif attribute == 'actattr':
-        acts_base_file_path = os.path.join(output_dir, 'data_representation', 'imagenet_actattr_base.h5')
+        acts_base_file_path = os.path.join(output_dir, 'data_representation', f'imagenet_{cfg.classifier_model.name}_actattr_base.h5')
 
     with h5py.File(acts_base_file_path, 'r', locking=False) as acts_base_file:
 
@@ -281,9 +281,9 @@ def get_local_target(cfg, unique_data_idx, output_dir, attribute='activation', n
 
     # Get encoding of current datapoint
     if attribute == 'attribution':
-        acts_cf_file_path = os.path.join(output_dir, 'data_representation', 'imagenet_rels_cf.h5')
+        acts_cf_file_path = os.path.join(output_dir, 'data_representation', f'imagenet_{cfg.classifier_model.name}_rels_cf.h5')
     else:
-        acts_cf_file_path = os.path.join(output_dir, 'data_representation', 'imagenet_acts_cf.h5')
+        acts_cf_file_path = os.path.join(output_dir, 'data_representation', f'imagenet_{cfg.classifier_model.name}_acts_cf.h5')
     with h5py.File(acts_cf_file_path, 'r', locking=False) as acts_cf_file:
 
         cf_acts = acts_cf_file['attribution'][cfg.concept_layer][unique_data_idx,:]
