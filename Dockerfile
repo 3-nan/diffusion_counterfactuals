@@ -58,11 +58,12 @@ COPY run_evaluation.py ./run_evaluation.py
 COPY test_stuff.py ./test_stuff.py
 
 # CMD ["python", "run_ldce_baseline.py", "--config-name=v1_original"]
-CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
+# CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
 
 # CMD ["python", "src/evaluation/compute_fid.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline"]
-# CMD ["python", "src/evaluation/compare_concept_activations.py", "--config-name=v1_vgg_concept"]
-# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_resnet18_concept_"]
+# CMD ["python", "src/evaluation/compare_concept_activations.py", "--config-name=v1_concept"]
+CMD ["python", "src/evaluation/obtain_wrong_predictions.py", "--config-name=v1_vgg_concept"]
+# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_40_concept_5_spatial"]
 
 # CMD ["python", "src/clustering/compute_clustering.py", "--config-name=v1_cluster"]
 # CMD ["python", "src/concept_analysis.py", "--config-name=v1_concept"]
@@ -88,3 +89,6 @@ CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
 # CMD ["python", "run_feature_optim.py", "--config-name=v1_dreamer"]
 # CMD ["python", "src/visualization/show_num_concepts.py"]
 # CMD ["python", "src/visualization/show_num_concept_example.py"]
+# CMD ["python", "src/visualization/show_explanations.py", "--config-name=v1_original"]
+# CMD ["python", "src/visualization/show_spatial_constraint.py"]
+# CMD ["python", "src/visualization/show_validity.py"]

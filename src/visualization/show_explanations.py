@@ -1,8 +1,16 @@
 
 import os
+import sys
 from PIL import Image
 import torch
+from tqdm import tqdm
 import zennit
+import hydra
+
+sys.path.append('./')
+sys.path.append('./ldce')
+from src.helpers.data_model_helpers import get_classifier
+from ldce.data.imagenet_classnames import name_map
 
 
 def get_target_tensor(target, name_map, device):
@@ -11,9 +19,42 @@ def get_target_tensor(target, name_map, device):
     class_target = list(name_map.keys())[list(name_map.values()).index(target)]
     class_target = torch.tensor([class_target], device=device)
 
+    class_target = torch.eye(1000, device=device)[class_target]
+
     return class_target
 
-def run_explanation_computation(cfg, act_base_file, attribute='activation'):
+def compute_explanation(classifier_model, img, target, model_name):
+    """ Compute the explanation. """
+
+    # target = torch.eye(1000)[target]
+
+    pred = classifier_model(img)
+
+    if model_name.startswith('resnet'):
+        canonizer = zennit.torchvision.ResNetCanonizer()
+    elif model_name.startswith('vgg'):
+        canonizer = zennit.torchvision.VGGCanonizer()
+
+    composite = zennit.composites.EpsilonPlus(canonizers=[canonizer])
+
+    # choose a target class for the attribution (label 437 is lighthouse)
+    # target = torch.eye(1000)[[437]]
+
+    # create the attributor, specifying model and composite
+    with zennit.attribution.Gradient(model=classifier_model, composite=composite) as attributor:
+        # compute the model output and attribution
+        output, attribution = attributor(img, target)
+
+    relevance = attribution.sum(1).cpu()
+
+    # create an image of the visualize attribution
+    expl = zennit.image.imgify(relevance, symmetric=True, cmap='coldnhot')
+
+    return expl
+
+
+@hydra.main(version_base=None, config_path="../../configs/ldce", config_name="v1")
+def run_explanation_computation(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -31,7 +72,10 @@ def run_explanation_computation(cfg, act_base_file, attribute='activation'):
     # ]
     # transform = transforms.Compose(transform_list)
 
-    for i in range(0, 50):
+    os.makedirs(os.path.join(cfg.output_dir, "explanations"), exist_ok=True)
+    os.chmod(os.path.join(cfg.output_dir, "explanations"), 0o777)
+
+    for i in tqdm(range(0, 50)):
 
         # load counterfactual
         # img = Image.open(os.path.join(cfg.output_dir, 'bucket_0_10/counterfactual', f'{str(i).zfill(5)}.png'))
@@ -56,30 +100,24 @@ def run_explanation_computation(cfg, act_base_file, attribute='activation'):
         # target = data['target']
         # class_target = list(name_map.keys())[list(name_map.values()).index(target)]
         # class_target = torch.tensor([class_target], device=device)
-        print(class_target)
+        # print(class_target)
 
         orig_img = data['image'][None].to(device)
-        print(orig_img.size())
+        # print(orig_img.size())
 
         gen_img = data['gen_image'][None].to(device)
 
-        pred = classifier_model(orig_img)
+        # pred = classifier_model(orig_img)
 
-        composite = zennit.composites.EpsilonPlus()
+        expl = compute_explanation(classifier_model, orig_img, class_source, cfg.classifier_model.name)
+        c_expl = compute_explanation(classifier_model, gen_img, class_target, cfg.classifier_model.name)
 
-        # choose a target class for the attribution (label 437 is lighthouse)
-        # target = torch.eye(1000)[[437]]
-
-        # create the attributor, specifying model and composite
-        with zennit.attribution.Gradient(model=classifier_model, composite=composite) as attributor:
-            # compute the model output and attribution
-            output, attribution = attributor(orig_img, class_source)
-
-        relevance = attribution.sum(1)
-
-        # create an image of the visualize attribution
-        expl = zennit.image.imgify(relevance, symmetric=True, cmap='coldnhot')
-        expl.imsave('/results/....')
+        expl.save(os.path.join(cfg.output_dir, f'explanations/{str(i).zfill(5)}_orig_expl.png'))
+        c_expl.save(os.path.join(cfg.output_dir, f'explanations/{str(i).zfill(5)}_ce_expl.png'))
 
         # show the image
         # display(img)
+
+if __name__ == '__main__':
+
+    run_explanation_computation()

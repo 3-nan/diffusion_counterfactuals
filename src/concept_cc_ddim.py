@@ -447,7 +447,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
     def concept_conditional_score(self, x, t, c, index, use_original_steps,
                               quantize_denoised, unconditional_guidance_scale=1,
                               unconditional_conditioning=None, y=None,
-                              concept_conditions=None, spatial=False):
+                              concept_conditions=None, spatial=False, uncondition_end=False):
         # return super().conditional_score(x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale, unconditional_conditioning, y)
         """
         Args:
@@ -519,15 +519,16 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
 
                     hook_map, y_targets = {}, []
 
-                    # if t[0].item() >= 50:                               # TEST THIS FIRST
-                    for key in concept_conditions.keys():
-                        if key not in hook_map:
-                            hook_map[key] = MaskHook([])
+                    # Free up last 50 generation steps
+                    if uncondition_end and t[0].item() >= 50:                               # TEST THIS FIRST
+                        for key in concept_conditions.keys():
+                            if key not in hook_map:
+                                hook_map[key] = MaskHook([])
 
-                        if spatial:
-                            _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
-                        else:
-                            _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
+                            if spatial:
+                                _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
+                            else:
+                                _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
 
                     # for i, cond in enumerate(concept_conditions):
                     #     for l_name, indices in cond.items():

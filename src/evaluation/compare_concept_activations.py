@@ -75,12 +75,12 @@ def get_representations(cfg, acts_file_path, attribute='activation'):
         cf_norm = np.linalg.norm(cf_acts, axis=1)
         cf_acts = (cf_acts.T / cf_norm).T
 
-def run_concept_comparison(cfg, act_base_file, attribute='activation'):
+def run_concept_comparison(cfg, attribute='activation'):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    base_acts = get_representations(cfg, act_base_file, attribute=attribute)
-    print(base_acts.shape)
+    # base_acts = get_representations(cfg, act_base_file, attribute=attribute)
+    # print(base_acts.shape)
 
     # Load model
     classifier_model = get_classifier(cfg, device)
@@ -93,73 +93,129 @@ def run_concept_comparison(cfg, act_base_file, attribute='activation'):
     ]
     transform = transforms.Compose(transform_list)
 
-    for i in range(8, 1000):
+    cfg_output_dir_split = cfg.output_dir.split('_')
+    print(cfg_output_dir_split)
 
-        # load counterfactual
-        # img = Image.open(os.path.join(cfg.output_dir, 'bucket_0_10/counterfactual', f'{str(i).zfill(5)}.png'))
-        img = Image.open(os.path.join(cfg.output_dir, 'bucket_0_10/counterfactual', f'{str(i).zfill(5)}.png'))
-        img = transform(img)
+    # for n_concepts in ['']:
+    for n_concepts in [1, 10, 20, 50, 100, 200, 300]:
 
-        # img = tf.center_crop(img, 224)
-        # img = normalize(img)
-        img = img[None].to(device)
+        cod = cfg_output_dir_split[:-1]
+        cod.append(str(n_concepts))
+        cfg_output_dir = "_".join(cod)
 
-        # load pth file
-        pth_file = os.path.join(cfg.output_dir, f"bucket_0_10/{str(i).zfill(5)}.pth")
-        data = torch.load(pth_file, map_location="cpu")
+        if os.path.isdir(cfg_output_dir):
 
-        conditions = data['conditions']
-        print(conditions)
+            print(cfg_output_dir)
 
-        target = data['target']
-        class_target = list(name_map.keys())[list(name_map.values()).index(target)]
-        class_target = torch.tensor([class_target], device=device)
-        print(class_target)
+            quality_ratios = []
+            random_ratios = []
 
-        orig_img = data['image'][None].to(device)
-        print(orig_img.size())
+            for i in range(0, 1000):
 
-        print(img.size())
-        logits = classifier_model(img)
-        # print(logits)
-        in_class_pred = logits.argmax(dim=1)
-        print(in_class_pred)
+                # load counterfactual
+                # img = Image.open(os.path.join(cfg.output_dir, 'bucket_0_10/counterfactual', f'{str(i).zfill(5)}.png'))
+                img = Image.open(os.path.join(cfg_output_dir, 'bucket_0_10/counterfactual', f'{str(i).zfill(5)}.png'))
+                img = transform(img)
 
-        b_acts, b_norm_acts, b_attrs, b_norm_attrs, b_rf_neurons = compute_layer_attributions(classifier_model, orig_img, class_target, layers=[cfg.concept_layer])
-        acts, norm_acts, attrs, norm_attrs, rf_neurons = compute_layer_attributions(classifier_model, img, class_target, layers=[cfg.concept_layer])
-        print(acts.keys())
-        print(acts[cfg.concept_layer].shape)
+                # img = tf.center_crop(img, 224)
+                # img = normalize(img)
+                img = img[None].to(device)
 
-        b_act = b_acts[cfg.concept_layer]
-        cf_act = acts[cfg.concept_layer]
+                # load pth file
+                pth_file = os.path.join(cfg_output_dir, f"bucket_0_10/{str(i).zfill(5)}.pth")
+                data = torch.load(pth_file, map_location="cpu")
 
-        # cf_acts = None
+                conditions = data['conditions']
+                # print(conditions)
 
-        # Derive concept-based differences
-        concept_diff = cf_act[0, conditions] - b_act[0, conditions]
-        print(concept_diff)
-        # diff = cf_act - base_acts[i]
-        # diff = cf_act
-        diff = cf_act - b_act
+                target = data['target']
+                class_target = list(name_map.keys())[list(name_map.values()).index(target)]
+                class_target = torch.tensor([class_target], device=device)
+                # print(class_target)
 
-        srt_inds = np.argsort(diff.abs(), axis=1)
-        test_srt_inds = np.argsort(diff[0, :].abs())
+                orig_img = data['image'][None].to(device)
+                # print(orig_img.size())
 
-        assert (srt_inds[0, :] == test_srt_inds).all()
+                # print(img.size())
+                logits = classifier_model(img)
+                # print(logits)
+                in_class_pred = logits.argmax(dim=1)
+                # print(in_class_pred)
 
-        print(srt_inds[:, -cfg.num_concepts:])
-        print(srt_inds[:, :cfg.num_concepts])
+                b_acts, b_norm_acts, b_attrs, b_norm_attrs, b_rf_neurons = compute_layer_attributions(classifier_model, orig_img, class_target, layers=[cfg.concept_layer])
+                acts, norm_acts, attrs, norm_attrs, rf_neurons = compute_layer_attributions(classifier_model, img, class_target, layers=[cfg.concept_layer])
+                # print(acts.keys())
+                # print(acts[cfg.concept_layer].shape)
 
-        print(diff[0].mean())
-        print(diff[0].median())
-        print(diff[0, srt_inds[:, -5*cfg.num_concepts:]])
+                b_act = b_acts[cfg.concept_layer]
+                cf_act = acts[cfg.concept_layer]
 
-        raise ValueError
+                b_attr = b_attrs[cfg.concept_layer]
+                cf_attr = attrs[cfg.concept_layer]
+
+                # cf_acts = None
+
+                # Derive concept-based differences
+                concept_diff = cf_act[0, conditions] - b_act[0, conditions]
+                # print(concept_diff)
+                # diff = cf_act - base_acts[i]
+                # diff = cf_act
+                diff = cf_act - b_act
+
+                srt_inds = np.argsort(diff.abs(), axis=1)
+                test_srt_inds = np.argsort(diff[0, :].abs())
+
+                assert (srt_inds[0, :] == test_srt_inds).all()
+
+                # print(srt_inds[:, -cfg.num_concepts:])
+                # print(srt_inds[:, :cfg.num_concepts])
+
+                # print(diff[0].mean())
+                # print(diff[0].median())
+                # print(diff[0, srt_inds[:, -5*cfg.num_concepts:]])
+
+                # Activation
+                # print(b_act[0, conditions])
+
+                # Gradient
+                # print(data['concept_diff'])
+
+                # Counterfactual Activation
+                # print(cf_act[0, conditions])
+
+                attr_diff = cf_attr - b_attr
+
+                k = len(conditions)
+
+                np_attr_diff = attr_diff.abs().numpy()
+
+                partitioned_ind = (
+                    np.argpartition(np_attr_diff, -k, axis=1)
+                        .take(range(-k, 0), axis=1)
+                )
+                # We use the newly selected indices to find the score of the top-k values
+                partitioned_scores = np.take_along_axis(np_attr_diff, partitioned_ind, axis=1)
+
+                random_scores = np.random.choice(np_attr_diff[0], k)
+
+                top_sum = partitioned_scores.sum()
+
+                cond_sum = attr_diff.abs()[0, conditions].sum()
+
+                random_ratios.append(random_scores.sum() / top_sum)
+                quality_ratios.append(cond_sum / top_sum)
+
+            print(f'Overall quality: {np.mean(quality_ratios)}')
+            print(f'Random scoring: {np.mean(random_ratios)}')
+
+            modelpath = "_".join(cfg_output_dir_split[1:-1])
+            np.save(f'/results/counterfactuals/validity/validity_{modelpath}_{n_concepts}_concept.npy', quality_ratios)
+            np.save(f'/results/counterfactuals/validity/validity_{modelpath}_{n_concepts}_random.npy', random_ratios)
 
 
     # Rank concepts and compare to concept selection
 
-    raise ValueError
+    # raise ValueError
 
 @hydra.main(version_base=None, config_path="../../configs/ldce", config_name="v1")
 def main(cfg : DictConfig) -> None:
@@ -167,9 +223,9 @@ def main(cfg : DictConfig) -> None:
     attribute = 'activation'       #   'activation'    'attribution
     output_dir = '/results/counterfactuals'
 
-    act_base_file = get_ref_file(cfg, output_dir, attribute=attribute)
+    # act_base_file = get_ref_file(cfg, output_dir, attribute=attribute)
 
-    run_concept_comparison(cfg, act_base_file, attribute=attribute)
+    run_concept_comparison(cfg, attribute=attribute)
 
 if __name__ == '__main__':
     main()
