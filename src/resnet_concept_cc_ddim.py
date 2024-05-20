@@ -495,7 +495,8 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
     def concept_conditional_score(self, x, t, c, index, use_original_steps,
                               quantize_denoised, unconditional_guidance_scale=1,
                               unconditional_conditioning=None, y=None,
-                              concept_conditions=None, spatial=False):
+                              concept_conditions=None, spatial=False,
+                              uncondition_end=True):
         # return super().conditional_score(x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale, unconditional_conditioning, y)
         """
         Args:
@@ -568,16 +569,17 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     hook_map, y_targets = {}, []
 
                     # if t[0].item() >= 50:                               # TEST THIS FIRST
-                    for key in concept_conditions.keys():
-                        if key not in hook_map:
-                            hook_map[key] = MaskHook([])
+                    if not uncondition_end or t[0].item() >= 50:
+                        for key in concept_conditions.keys():
+                            if key not in hook_map:
+                                hook_map[key] = MaskHook([])
 
-                        if spatial:
-                            _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
-                        else:
-                            _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
+                            if spatial:
+                                _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
+                            else:
+                                _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
 
-                        handles, layer_out = _append_recording_layer_hooks(self.classifier, [], None, [key])
+                            handles, layer_out = _append_recording_layer_hooks(self.classifier, [], None, [key])
 
 
                     name_map = [([name], hook) for name, hook in hook_map.items()]
@@ -621,35 +623,38 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
 
                         # inputs = layer_out[key]
 
-                        try:
-                            # print(log_probs.size())
-                            # print(grad_tensors.size())
-                            # print((log_probs*grad_tensors.T).size())
-                            grad = torch.autograd.grad((log_probs*grad_tensors.T).T, inputs=layer_out[key], grad_outputs=grad_tensors, retain_graph=True)
-                        except RuntimeError as e:
-                            if "allow_unused=True" not in str(e):
-                                raise e
-                            else:
+                        if not uncondition_end or t[0].item() >= 50:
+
+                            try:
+                                grad = torch.autograd.grad((log_probs*grad_tensors.T).T, inputs=layer_out[key], grad_outputs=grad_tensors, retain_graph=True)
+
+                            except RuntimeError as e:
+                                if "allow_unused=True" not in str(e):
+                                    raise e
+                                else:
+                                    raise RuntimeError(
+                                        "The layer names must be ordered according to their succession in the model if 'exclude_parallel'=True."
+                                        " Please make sure to start with the last and end with the first layer in each condition dict. In addition,"
+                                        " parallel layers can not be used in one condition.")
+
+                            if grad is None:
                                 raise RuntimeError(
                                     "The layer names must be ordered according to their succession in the model if 'exclude_parallel'=True."
                                     " Please make sure to start with the last and end with the first layer in each condition dict. In addition,"
                                     " parallel layers can not be used in one condition.")
 
-                        if grad is None:
-                            raise RuntimeError(
-                                "The layer names must be ordered according to their succession in the model if 'exclude_parallel'=True."
-                                " Please make sure to start with the last and end with the first layer in each condition dict. In addition,"
-                                " parallel layers can not be used in one condition.")
+                            wrt_tensor, grad_tensors = layer_out[key], grad
 
-                        wrt_tensor, grad_tensors = layer_out[key], grad
+                            torch.autograd.backward(wrt_tensor, grad_tensors, retain_graph=True)
+                            # grad_classifier = torch.autograd.grad(x.grad, x_noise, retain_graph=True)[0]
+                            # print(x_noise.grad.size())
+                            # grad_classifier = torch.autograd.grad(wrt_tensor, x_noise, retain_graph=True)[0]
+                            grad_classifier = x_noise.grad
 
-                        torch.autograd.backward(wrt_tensor, grad_tensors, retain_graph=True)
-                        # grad_classifier = torch.autograd.grad(x.grad, x_noise, retain_graph=True)[0]
-                        # print(x_noise.grad.size())
-                        # grad_classifier = torch.autograd.grad(wrt_tensor, x_noise, retain_graph=True)[0]
-                        grad_classifier = x_noise.grad
-
-                        [h.remove() for h in handles]
+                            [h.remove() for h in handles]
+                        else:
+                            grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
+        
                         #######################################
 
                         # grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]

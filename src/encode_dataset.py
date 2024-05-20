@@ -24,6 +24,7 @@ from ldce.sampling_helpers import normalize
 
 sys.path.append("./")
 from src.latent_representation.representations import compute_layer_attributions
+from src.latent_representation.vit_representations import compute_vit_layer_attributions
 from src.helpers.data_model_helpers import get_classifier, get_dataset
 
 
@@ -272,7 +273,10 @@ def main(cfg : DictConfig) -> None:
             #                 'features.27',
             #                 'features.29']
 
-            acts, norm_acts, attrs, norm_attrs, rf_neurons = compute_layer_attributions(classifier_model, image, in_class_pred, layers=inter_layers)
+            if cfg.classifier_model.name.startswith("vit"):
+                acts, norm_acts, attrs, norm_attrs, rf_neurons = compute_vit_layer_attributions(classifier_model, image, in_class_pred, layers=inter_layers)
+            else:
+                acts, norm_acts, attrs, norm_attrs, rf_neurons = compute_layer_attributions(classifier_model, image, in_class_pred, layers=inter_layers)
 
             # Save representations in h5py
             append_attributions_to_attribution_database(

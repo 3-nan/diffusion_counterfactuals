@@ -44,11 +44,19 @@ def compute_lp_norms(args, batch_size=15):
                                 shuffle=False,
                                 num_workers=16, pin_memory=True)
     l1, l2 = [], []
+    mse = []
     for orig, cf in tqdm(loader, leave=False):
         diff = orig.view(orig.shape[0], -1) - cf.view(cf.shape[0], -1) 
         l1 += list(torch.norm(diff, p=1, dim=-1).cpu().numpy())
         l2 += list(torch.norm(diff, p=2, dim=-1).cpu().numpy())
-    return np.mean(l1), np.mean(l2)
+
+        # print((diff.cpu().numpy()**2).shape)
+        # print(np.mean(diff.cpu().numpy()**2, axis=0).shape)
+        # print(np.mean(diff.cpu().numpy()**2, axis=1).shape)
+        # print(list(np.mean(diff.cpu().numpy()**2, axis=1)))
+        # print(list(np.mean(diff.cpu().numpy()**2)))
+        mse += list(np.mean(diff.cpu().numpy()**2, axis=1))
+    return np.mean(l1), np.mean(l2), np.mean(mse)
 
 def arguments():
     parser = argparse.ArgumentParser(description="LP norm evaluation")
@@ -60,7 +68,8 @@ if __name__ == '__main__':
     args = arguments()
     device = torch.device("cuda")
     
-    l1, l2 = compute_lp_norms(args, batch_size=15)
+    l1, l2, mse = compute_lp_norms(args, batch_size=15)
 
     print(f"L1: {l1}")
     print(f"L2: {l2}")
+    print(f"MSE: {mse}")

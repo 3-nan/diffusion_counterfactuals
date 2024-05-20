@@ -8,6 +8,7 @@ import copy
 import cv2
 import h5py
 import hydra
+import json
 from omegaconf import OmegaConf, DictConfig, open_dict
 import numpy as np
 import random
@@ -46,7 +47,53 @@ def create_mask_overlay(image, mask, blur_th=0.25):
 
     return masked_image
 
-def show_localization_constraints(model, image, conditions, cinds, start_idx=0):
+def show_localization_gradient(model, image, target, conditions, cinds, start_idx=0):
+
+    start_idx = start_idx * len(image)
+
+    for i, (img, tgt, cond, inds) in enumerate(zip(image, target, conditions, cinds)):
+
+        inp_img = _map_img(img)
+        if not self.classifier_wrapper: # only works for ImageNet!
+            inp_img = tf.center_crop(inp_img, 224)
+            inp_img = normalize(inp_img)
+
+        fig, ax = plt.subplots(len(inds), 1, figsize=(4, int(2.5*len(inds))))
+
+        for d, ind in enumerate(inds):
+
+            hook_map, y_targets = {}, []
+            for key in concept_conditions.keys():
+                if key not in hook_map:
+                    hook_map[key] = MaskHook([])
+
+                _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
+
+            name_map = [([name], hook) for name, hook in hook_map.items()]
+            mask_composite = NameMapComposite(name_map)
+
+            with zennit.attribution.Gradient(model) as modified:
+
+                pred, attr = modified(inp_img)
+
+            t = cond[ind].cpu()
+            t_resized = nn.functional.interpolate(t[None, None, :, :], 256, mode='bilinear')
+
+            binary_mask = np.array(t_resized[0].numpy() > 0.5, dtype=np.uint8)
+
+            cv_img = create_mask_overlay(img.cpu().numpy(), binary_mask)
+
+
+            ax[d].imshow(cv_img)
+
+            ax[d].set_title(ind, x=-0.1, y=0.45, rotation=90)
+            ax[d].axis('off')
+
+        plt.tight_layout()
+        plt.savefig(f'/results/counterfactuals/localization/{str(start_idx + i).zfill(5)}_localization.svg')
+        plt.close()
+
+def show_localization_constraints(model, image, conditions, cinds, concept_layer, start_idx=0):
 
     start_idx = start_idx * len(image)
 
@@ -75,7 +122,7 @@ def show_localization_constraints(model, image, conditions, cinds, start_idx=0):
         # ax[0].imshow(zennit.image.imgify(img.cpu()))
         # ax[0].axis('off')
 
-        for d, ind in enumerate(inds):
+        for d, ind in enumerate(inds[::-1]):
 
             # print(cond.size())
             # print(cond[ind].size())
@@ -102,7 +149,7 @@ def show_localization_constraints(model, image, conditions, cinds, start_idx=0):
             ax[d].axis('off')
 
         plt.tight_layout()
-        plt.savefig(f'/results/counterfactuals/localization/{str(start_idx + i).zfill(5)}_localization.svg')
+        plt.savefig(f'/results/counterfactuals/localization/{concept_layer}_{str(start_idx + i).zfill(5)}_localization.svg')
         plt.close()
 
         # model = copy.deepcopy(model_original)
@@ -358,6 +405,20 @@ def main(cfg : DictConfig) -> None:
                 tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
             else:
                 raise NotImplementedError
+            
+        if "counterfactual_target" in cfg:
+            if cfg.counterfactual_target == "baseline":
+                tgt_json = os.path.join('/results/counterfactuals/', 'concept_selection', f'conditions_{cfg.classifier_model.name}_{cfg.counterfactual_target}.json')
+            elif cfg.target_norm:
+                tgt_json = os.path.join('/results/counterfactuals/', 'concept_selection', f'conditions_{cfg.classifier_model.name}_{cfg.concept_layer}_{cfg.counterfactual_target}_norm.json')
+            else:
+                tgt_json = os.path.join('/results/counterfactuals/', 'concept_selection', f'conditions_{cfg.classifier_model.name}_{cfg.concept_layer}_{cfg.counterfactual_target}.json')
+            with open(tgt_json) as f:
+                d = json.load(f)
+
+            tgt_classes = [d[str(uix.item())]['target'] for uix in unique_data_idx]
+            tgt_classes = torch.tensor(tgt_classes, dtype=torch.int64).to(device)
+
 
 
         image = image.to(device) #squeeze()
@@ -379,12 +440,13 @@ def main(cfg : DictConfig) -> None:
         # print(conditions.keys())
 
         # print(conditions[concept_layer].size())
+        # print(concept_conds[concept_layer])
 
-        show_localization_constraints(classifier_model, image, conditions[concept_layer], concept_conds[concept_layer], start_idx=i)
+        show_localization_constraints(classifier_model, image, conditions[concept_layer], concept_conds[concept_layer], concept_layer, start_idx=i)
         # raise ValueError
 
-        if i > 6:
-            raise ValueError
+        # if i > 6:
+        #     raise ValueError
 
 if __name__ == '__main__':
     main()

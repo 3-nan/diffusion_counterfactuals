@@ -315,8 +315,11 @@ def main(cfg : DictConfig) -> None:
 
     # Load dataset
     # dataset = get_dataset(cfg, base=True)
-    # classifier = get_classifier(cfg, device)
-    # classifier.to(device).eval()
+    classifier = get_classifier(cfg, device)
+    classifier.to(device).eval()
+
+    for n, m in classifier.named_modules():
+        print(f'{n} ({type(m)})')
 
     output_dir = '/results/counterfactuals'
 

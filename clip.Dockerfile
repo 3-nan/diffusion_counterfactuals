@@ -26,7 +26,7 @@ RUN git clone https://github.com/lmb-freiburg/ldce.git
 
 # RUN pip3 install git+https://github.com/rachtibat/zennit-crp
 
-RUN pip3 install certifi
+RUN pip3 install --upgrade certifi
 COPY ca-certificates /usr/local/share/ca-certificates
 RUN apt-get install --yes --no-install-recommends software-properties-common ca-certificates
 # RUN chmod 644 /usr/local/share/ca-certificates/continental.crt
@@ -35,9 +35,12 @@ RUN update-ca-certificates
 
 RUN pip3 install corelay[umap,hdbscan]
 RUN pip3 install opencv-python
+RUN pip3 install seaborn
+RUN pip3 install open_clip_torch
 
-# ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_DIR=/etc/ssl/certs
+# ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 ENV HYDRA_FULL_ERROR=1
 
@@ -56,12 +59,16 @@ COPY run_feature_optim.py ./run_feature_optim.py
 COPY run_evaluation.py ./run_evaluation.py
 COPY test_stuff.py ./test_stuff.py
 
-CMD ["python", "run_ldce_baseline.py", "--config-name=v1_concept_vit"]
+# CMD ["python", "run_ldce_baseline.py", "--config-name=v1_original"]
 # CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
 
+# CMD ["python", "run_concept_ldce.py", "--config-name=v1_pets"]
+CMD ["python", "run_concept_ldce.py", "--config-name=v1_flowers"]
+
 # CMD ["python", "src/evaluation/compute_fid.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline"]
-# CMD ["python", "src/evaluation/compute_validity_metrics.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline", "--target-model=resnet50"]
-# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_40_concept_300"]
+# CMD ["python", "src/evaluation/compare_concept_activations.py", "--config-name=v1_concept"]
+# CMD ["python", "src/evaluation/obtain_wrong_predictions.py", "--config-name=v1_vgg_concept"]
+# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_40_concept_100_spatial_optim"]
 
 # CMD ["python", "src/clustering/compute_clustering.py", "--config-name=v1_cluster"]
 # CMD ["python", "src/concept_analysis.py", "--config-name=v1_concept"]
@@ -85,3 +92,8 @@ CMD ["python", "run_ldce_baseline.py", "--config-name=v1_concept_vit"]
 # CMD ["python", "test_stuff.py", "--config-name=v1_wider"]
 
 # CMD ["python", "run_feature_optim.py", "--config-name=v1_dreamer"]
+# CMD ["python", "src/visualization/show_num_concepts.py"]
+# CMD ["python", "src/visualization/show_num_concept_example.py"]
+# CMD ["python", "src/visualization/show_explanations.py", "--config-name=v1_concept"]
+# CMD ["python", "src/visualization/show_spatial_constraint.py"]
+# CMD ["python", "src/visualization/show_validity.py"]

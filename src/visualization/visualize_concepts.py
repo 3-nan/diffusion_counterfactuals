@@ -6,6 +6,7 @@ sys.path.append("./ldce")
 sys.path.append("./data")
 import hydra
 from hydra.utils import instantiate
+import json
 from omegaconf import OmegaConf, open_dict, DictConfig
 import numpy as np
 import random
@@ -20,13 +21,14 @@ from crp.attribution import CondAttribution
 from crp.concepts import ChannelConcept
 from crp.helper import get_layer_names
 from crp.visualization import FeatureVisualization
-from crp.image import plot_grid, vis_opaque_img
+from crp.image import vis_opaque_img    # plot_grid
 
 from ldce.data.imagenet_classnames import name_map, openai_imagenet_classes
 
 from src.sampling_helpers import disabled_train
 from src.concept_conditioning import compute_concept_conditioning
 from src.helpers.data_model_helpers import get_classifier
+from src.helpers.concept_visualization import plot_grid
 
 def set_seed(seed: int = 0):
     torch.manual_seed(seed)
@@ -43,6 +45,36 @@ def get_dataset(cfg, last_data_idx: int = 0):
         ]
         transform = T.Compose(transform_list)
         dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
+    elif "Flowers102" in cfg.data._target_:
+        transform = T.Compose([
+            T.Resize((256, 256)),
+            T.ToTensor(),
+        ])
+        dataset = instantiate(
+            cfg.data, 
+            shard=cfg.data.shard, 
+            num_shards=cfg.data.num_shards, 
+            transform=transform, 
+            restart_idx=last_data_idx
+        )
+    elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
+        def _convert_to_rgb(image):
+            return image.convert('RGB')
+        out_size = 256
+        transform_list = [
+            T.Resize((out_size, out_size)),
+            # transforms.CenterCrop(out_size),
+            _convert_to_rgb,
+            T.ToTensor(),
+        ]
+        transform = T.Compose(transform_list)
+        dataset = instantiate(
+            cfg.data, 
+            shard=cfg.data.shard, 
+            num_shards=cfg.data.num_shards, 
+            transform=transform, 
+            restart_idx=last_data_idx
+        )
     else:
         raise NotImplementedError
     return dataset
@@ -53,8 +85,15 @@ def get_dataset(cfg, last_data_idx: int = 0):
 
 def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx, base_label, cf_label, attr="relevance"):
 
-    # fv_path = '/results/counterfactuals/fv_imagenet_vgg16bn'
-    fv_path = f'/results/counterfactuals/fv_imagenet_{cfg.classifier_model.name}'
+    if cfg.classifier_model.name == 'vgg16_bn':
+        fv_path = '/results/counterfactuals/fv_imagenet_vgg16bn'
+    else:
+        if "ImageNet" in cfg.data._target_:
+            fv_path = f'/results/counterfactuals/fv_imagenet_{cfg.classifier_model.name}'
+        elif "Flowers" in cfg.data._target_:
+            fv_path = f'/results/counterfactuals/fv_flowers_{cfg.classifier_model.name}'
+        elif "Pets" in cfg.data._target_:
+            fv_path = f'/results/counterfactuals/fv_pets_{cfg.classifier_model.name}'
 
 
     attribution = CondAttribution(model)
@@ -75,6 +114,7 @@ def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx,
 
     ref_c = fv.get_max_reference(concepts, layer, attr, (0, 8), composite=composite, plot_fn=None)
     plot_grid(ref_c, figsize=(6, 9))
+    plt.close()
 
     # plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{str(uidx).zfill(5)}_ref_{attr}_concept.png'))
     # plt.close()
@@ -91,8 +131,8 @@ def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx,
         else:
             ref_t = fv.get_stats_reference(concept, layer, [base_label], attr, (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
         ref_t_all.update(ref_t)
-    plot_grid(ref_t_all, figsize=(6, 9), padding=False)
-    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.png'))
+    plot_grid(ref_t_all, concept_diff=concept_diff, figsize=(6, 9), padding=False)
+    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
     plt.close()
 
 
@@ -213,29 +253,29 @@ def main(cfg : DictConfig) -> None:
     #         i2h = ["old", "young"]
     #     else:
     #         raise NotImplementedError
-    # elif "Flowers102" in cfg.data._target_:
-    #     with open("data/flowers_idx_to_label.json", "r") as f:
-    #         flowers_idx_to_classname = json.load(f)
-    #     flowers_idx_to_classname = {int(k)-1: v for k, v in flowers_idx_to_classname.items()}
-    #     i2h = flowers_idx_to_classname
-    # elif "OxfordIIIPets" in cfg.data._target_:
-    #     with open("data/pets_idx_to_label.json", "r") as f:
-    #         pets_idx_to_classname = json.load(f)
-    #     i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
+    elif "Flowers102" in cfg.data._target_:
+        with open("data/flowers_idx_to_label.json", "r") as f:
+            flowers_idx_to_classname = json.load(f)
+        flowers_idx_to_classname = {int(k)-1: v for k, v in flowers_idx_to_classname.items()}
+        i2h = flowers_idx_to_classname
+    elif "OxfordIIIPets" in cfg.data._target_:
+        with open("data/pets_idx_to_label.json", "r") as f:
+            pets_idx_to_classname = json.load(f)
+        i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
     else:
         raise NotImplementedError
 
     if "ImageNet" in cfg.data._target_:
         with open('data/synset_closest_idx.yaml', 'r') as file:
             synset_closest_idx = yaml.safe_load(file)
-    # elif "Flowers102" in cfg.data._target_:
-    #     with open("data/flowers_closest_indices.json") as file:
-    #         closest_indices = json.load(file)
-    #     closest_indices = {int(k):v for k,v in closest_indices.items()}
-    # elif "OxfordIIIPets" in cfg.data._target_:
-    #     with open("data/pets_closest_indices.json") as file:
-    #         closest_indices = json.load(file)
-    #     closest_indices = {int(k):v for k,v in closest_indices.items()}
+    elif "Flowers102" in cfg.data._target_:
+        with open("data/flowers_closest_indices.json") as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
+    elif "OxfordIIIPets" in cfg.data._target_:
+        with open("data/pets_closest_indices.json") as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
 
     concept_layer = cfg.concept_layer       # "backbone.features.29"
     spatial = cfg.spatial
@@ -289,7 +329,15 @@ def main(cfg : DictConfig) -> None:
 
             dict_save_path = os.path.join(out_dir, f'{str(uidx).zfill(5)}.pth')
 
-            data_dict = torch.load(dict_save_path)
+            data_dict = torch.load(dict_save_path, map_location="cpu")
+
+            source_pred = data_dict['in_pred']
+            source_pred = list(name_map.keys())[list(name_map.values()).index(source_pred)]
+            # class_source = torch.tensor([class_source], device=device)
+
+            target = data_dict['target']
+            class_target = list(name_map.keys())[list(name_map.values()).index(target)]
+            # class_target = torch.tensor([class_target], device=device)
 
             if 'conditions' in data_dict:
                 conditions = data_dict['conditions']
@@ -325,13 +373,18 @@ def main(cfg : DictConfig) -> None:
         
             if conditions.shape[0] > 6:
                 conditions = conditions[-6:]
+                concept_diff = concept_diff[-6:]
 
-            print(conditions)
-            print(label[j].item())
-            print(tgt_classes[j].item())
-            print(type(uidx))
+            print(uidx)
+            # print(conditions)
+            # print(label[j].item())
+            # print(tgt_classes[j].item())
+            # print(type(uidx))
 
-            visualize_concepts(cfg, ref_dataset, classifier_model, concept_layer, conditions, concept_diff, uidx, label[j].item(), tgt_classes[j].item(), attr=attr)
+            # print(source_pred)
+
+            # visualize_concepts(cfg, ref_dataset, classifier_model, concept_layer, conditions, concept_diff, uidx, label[j].item(), tgt_classes[j].item(), attr=attr)
+            visualize_concepts(cfg, ref_dataset, classifier_model, concept_layer, conditions[::-1], concept_diff[::-1], uidx, source_pred, class_target, attr=attr)
 
 
 if __name__ == '__main__':

@@ -36,9 +36,10 @@ if __name__ == "__main__":
             fid = compute_fid(args)
             print("sFID:" if args.sfid else "FID:", fid)
 
-            l1, l2 = compute_lp_norms(args)
+            l1, l2, mse = compute_lp_norms(args)
             print(f"L1: {l1}")
             print(f"L2: {l2}")
+            print(f"MSE: {mse}")
 
             flip_ratio, confidence = compute_validity_metrics(args)
 

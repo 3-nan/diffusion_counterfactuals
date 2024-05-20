@@ -1,0 +1,50 @@
+output_dir: /results/counterfactuals/
+
+seg_model:
+classifier_model:
+  name: "vit_b_16"      # vgg16   vgg16_bn
+
+concept_layer: encoder.layers.encoder_layer_10 #layer4.1.conv1 # features.37    # 29  # 40
+
+intermediate_layers:
+  # - features.37
+  # - features.40
+  # - encoder.layers.encoder_layer_10
+  # - encoder.layers.encoder_layer_10.self_attention
+  - encoder.layers.encoder_layer_11
+  - encoder.layers.encoder_layer_11.self_attention
+  - encoder.layers.encoder_layer_11.mlp.linear_1
+  - encoder.layers.encoder_layer_11.mlp.linear_2
+  - encoder
+  # - heads.head
+  # - layer4.0.conv1
+  # - layer4.1.conv1
+
+# attribution_file_path: /results/counterfactuals/data_representation/imagenet_rels_base.h5
+attribution_file_path: /results/counterfactuals/data_representation/imagenet_vit_b_16_actattr_base.h5
+cf_attr_file_path: /results/counterfactuals/data_representation/imagenet_vit_b_16_acts_cf.h5
+cf_gen_attr_file_path: /results/counterfactuals/data_representation/imagenet_vit_b_16_acts_cf_gen.h5
+
+analysis_file_path: /results/counterfactuals/data_representation/analysis_vit_b_16.h5
+
+counterfactuals_dir: /results/counterfactuals/imagenet_vit_b_16_concept_10/bucket_0_10/counterfactual/
+
+data:
+  _target_: data.datasets.ImageNet
+  root: '/Data/imagenet/val'
+  idx_to_tgt_cls_path: './ldce/data/image_idx_to_tgt.yaml'
+  split: 'val'
+  return_tgt_cls: True
+  batch_size: 4
+  start_sample: 10
+  end_sample: 50
+
+cf_data:
+  _target_: data.datasets.ImageNet
+  root: '/Data/imagenet/val'
+  idx_to_tgt_cls_path: './ldce/data/image_idx_to_tgt.yaml'
+  split: 'val'
+  return_tgt_cls: True
+  batch_size: 4
+  start_sample: 0
+  end_sample: 10

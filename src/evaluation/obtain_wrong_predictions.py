@@ -104,6 +104,7 @@ def main(cfg : DictConfig) -> None:
     set_seed(seed=seed)
 
     wrong_prediction_counter = 0
+    cf_correct_counter = 0
 
     for i, batch in enumerate(data_loader):
 
@@ -181,10 +182,13 @@ def main(cfg : DictConfig) -> None:
 
         if miss.numel():
             for miss_val in miss:
-                print(miss_val.item() + i*batch_size)
-                print(f"converting {miss_val} from wrong: {i2h[in_class_pred[miss_val].item()]} to right: {i2h[int(tgt_classes[miss_val].item())]} and label {i2h[int(label[miss_val].item())]}")
+                # print(miss_val.item() + i*batch_size)
+                print(f"converting {miss_val.item() + i*batch_size} from wrong: {i2h[in_class_pred[miss_val].item()]} to right: {i2h[int(tgt_classes[miss_val].item())]} and label {i2h[int(label[miss_val].item())]}")
                 
                 wrong_prediction_counter += 1
+
+                if int(tgt_classes[miss_val].item()) == int(label[miss_val].item()):
+                    cf_correct_counter +=1
             # raise ValueError
         # print(torch.where(in_class_pred != label)[0])
         # print(f'Pred: {in_class_pred}')
@@ -201,6 +205,7 @@ def main(cfg : DictConfig) -> None:
         # raise ValueError
     
     print(f'Wrong predictions: {wrong_prediction_counter}')
+    print(f'Correctly chosen cf target: {cf_correct_counter}')
 
 if __name__ == '__main__':
     main()

@@ -12,10 +12,10 @@ def store_hook(module, input, output):
     # keep the output tensor gradient, even if it is not a leaf-tensor
     output.retain_grad()
 
-def compute_concept_conditioning(model, image, target, layer_name, num_concepts=20, spatial=False, spatial_th=0.4, cond_option='sumabs', return_gradient=False):
+def compute_concept_conditioning(model, image, target, layer_name, num_concepts=20, num_classes=1000, spatial=False, spatial_th=0.4, cond_option='sumabs', return_gradient=False):
     """ Compute concept conditioning. """
 
-    print(f'image min: {torch.min(image)} and max {torch.max(image)}')
+    # print(f'image min: {torch.min(image)} and max {torch.max(image)}')
     # image = _map_img(image)
     # if not model.classifier_wrapper: # only works for ImageNet!
     image = tf.center_crop(image, 224)
@@ -23,13 +23,13 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
 
     layer = None
     for name, lay in model.named_modules():
-        print(f'{name} : {type(lay)}')
+        # print(f'{name} : {type(lay)}')
         if name == layer_name:
             layer = lay
 
     assert layer
 
-    target_tensor = torch.eye(1000)[target]
+    target_tensor = torch.eye(num_classes)[target]
     target_tensor = target_tensor.to(image.device)
 
     # Get gradient in specified layer

@@ -131,7 +131,8 @@ def show_concepts(i, concept_layer, conditioning_file, fv, i2h):
 
         print(f'{str(i).zfill(5)}: {label} - {i2h[label]} --> {cf_label} - {i2h[cf_label]}')
 
-        for cond_option in ['sumabs', 'sum', 'sumequal', 'absmean', 'abssum', 'absmax']:
+        # for cond_option in ['sumabs', 'sum', 'sumequal', 'absmean', 'abssum', 'absmax']:
+        for cond_option in ['sumabs']:
             if cond_option in cfile[concept_layer]:
                 conditions = cfile[concept_layer][cond_option]['concepts'][i].astype('int32')
                 concept_diff = cfile[concept_layer][cond_option]['diffs'][i]
@@ -146,7 +147,7 @@ def show_concepts(i, concept_layer, conditioning_file, fv, i2h):
                     ref_t_all.update(ref_t)
 
                 plot_grid(ref_t_all, concept_diff, figsize=(6, 9), padding=False)
-                plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{str(i).zfill(5)}_concepts_{cond_option}.png'))
+                plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{concept_layer}_{str(i).zfill(5)}_concepts_{cond_option}.svg'))
                 plt.close()
 
 
@@ -181,15 +182,15 @@ def main(cfg : DictConfig) -> None:
     #         i2h = ["old", "young"]
     #     else:
     #         raise NotImplementedError
-    # elif "Flowers102" in cfg.data._target_:
-    #     with open("data/flowers_idx_to_label.json", "r") as f:
-    #         flowers_idx_to_classname = json.load(f)
-    #     flowers_idx_to_classname = {int(k)-1: v for k, v in flowers_idx_to_classname.items()}
-    #     i2h = flowers_idx_to_classname
-    # elif "OxfordIIIPets" in cfg.data._target_:
-    #     with open("data/pets_idx_to_label.json", "r") as f:
-    #         pets_idx_to_classname = json.load(f)
-    #     i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
+    elif "Flowers102" in cfg.data._target_:
+        with open("data/flowers_idx_to_label.json", "r") as f:
+            flowers_idx_to_classname = json.load(f)
+        flowers_idx_to_classname = {int(k)-1: v for k, v in flowers_idx_to_classname.items()}
+        i2h = flowers_idx_to_classname
+    elif "OxfordIIIPets" in cfg.data._target_:
+        with open("data/pets_idx_to_label.json", "r") as f:
+            pets_idx_to_classname = json.load(f)
+        i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
     else:
         raise NotImplementedError
 

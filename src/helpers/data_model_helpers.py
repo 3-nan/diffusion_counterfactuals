@@ -65,36 +65,36 @@ def get_dataset(cfg, last_data_idx: int = 0, base=False):
     #         num_shards=cfg.data.num_shards,
     #         restart_idx=last_data_idx
     #     )
-    # elif "Flowers102" in cfg.data._target_:
-    #     transform = transforms.Compose([
-    #         transforms.Resize((256, 256)),
-    #         transforms.ToTensor(),
-    #     ])
-    #     dataset = instantiate(
-    #         cfg.data, 
-    #         shard=cfg.data.shard, 
-    #         num_shards=cfg.data.num_shards, 
-    #         transform=transform, 
-    #         restart_idx=last_data_idx
-    #     )
-    # elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
-    #     def _convert_to_rgb(image):
-    #         return image.convert('RGB')
-    #     out_size = 256
-    #     transform_list = [
-    #         transforms.Resize((out_size, out_size)),
-    #         # transforms.CenterCrop(out_size),
-    #         _convert_to_rgb,
-    #         transforms.ToTensor(),
-    #     ]
-    #     transform = transforms.Compose(transform_list)
-    #     dataset = instantiate(
-    #         cfg.data, 
-    #         shard=cfg.data.shard, 
-    #         num_shards=cfg.data.num_shards, 
-    #         transform=transform, 
-    #         restart_idx=last_data_idx
-    #     )
+    elif "Flowers102" in cfg.data._target_:
+        transform = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+        ])
+        dataset = instantiate(
+            cfg.data, 
+            shard=cfg.data.shard, 
+            num_shards=cfg.data.num_shards, 
+            transform=transform, 
+            restart_idx=last_data_idx
+        )
+    elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
+        def _convert_to_rgb(image):
+            return image.convert('RGB')
+        out_size = 256
+        transform_list = [
+            transforms.Resize((out_size, out_size)),
+            # transforms.CenterCrop(out_size),
+            _convert_to_rgb,
+            transforms.ToTensor(),
+        ]
+        transform = transforms.Compose(transform_list)
+        dataset = instantiate(
+            cfg.data, 
+            shard=cfg.data.shard, 
+            num_shards=cfg.data.num_shards, 
+            transform=transform, 
+            restart_idx=last_data_idx
+        )
     else:
         raise NotImplementedError
     return dataset

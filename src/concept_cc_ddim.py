@@ -447,7 +447,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
     def concept_conditional_score(self, x, t, c, index, use_original_steps,
                               quantize_denoised, unconditional_guidance_scale=1,
                               unconditional_conditioning=None, y=None,
-                              concept_conditions=None, spatial=False, uncondition_end=False):
+                              concept_conditions=None, spatial=False, uncondition_end=True):
         # return super().conditional_score(x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale, unconditional_conditioning, y)
         """
         Args:
@@ -520,7 +520,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     hook_map, y_targets = {}, []
 
                     # Free up last 50 generation steps
-                    if uncondition_end and t[0].item() >= 50:                               # TEST THIS FIRST
+                    if not uncondition_end or t[0].item() >= 50:                               # TEST THIS FIRST
                         for key in concept_conditions.keys():
                             if key not in hook_map:
                                 hook_map[key] = MaskHook([])
@@ -576,8 +576,18 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     # the generation to class-specific changes in these concepts only.          #
                     #############################################################################
                         # print([m for m, n in self.classifier.named_modules()])
+                        use_loss_grad = True
 
-                        grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
+                        if use_loss_grad:
+                            grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
+                        else:
+                            # print(pred_logits.size())
+                            # print(log_probs)
+                            # print(y)
+                            ctarget = torch.eye(pred_logits.size(1), device=device)[y]
+                            # print(ctarget.size())
+                            # raise ValueError
+                            grad_classifier = torch.autograd.grad(pred_logits, x_noise, grad_outputs=ctarget, retain_graph=True)[0]
                         # grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=False)[0]
 
                         # torch.autograd.backward(log_probs, y, retain_graph=True)
