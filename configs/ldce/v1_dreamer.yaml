@@ -1,0 +1,50 @@
+resume: False
+fixed_seed: False
+record_intermediate: False
+output_dir: /results/counterfactuals/dreamer
+
+diffusion_model:
+  # cfg_path: "models/ldm/cin256-v2/config.yaml"
+  cfg_path: "configs/latent-diffusion/cin256-v2.yaml"
+  ckpt_path: "models/ldm/nitro_cin/model.ckpt"
+  # ckpt_path: "models/ldm/imagenet_ldm.ckpt"
+
+seg_model:
+classifier_model:
+  # name: "resnet50"
+  name: "vgg16"
+
+
+n_samples_per_class: #2
+strength: 0.382 #0.322 #0.382 #0.34 #0.3 #28 #0.25
+scale: 7 #2.45 #2.85    # original=3
+temperature: 2.
+ddim_steps: 500 #500 #375 
+ddim_eta: 0.
+log_rate: 1
+
+data:
+  _target_: data.datasets.ImageNet
+  root: '/Data/imagenet/val'
+  idx_to_tgt_cls_path: './ldce/data/image_idx_to_tgt.yaml'
+  split: 'val'
+  return_tgt_cls: True
+  cond_tgt_cls: True
+  batch_size: 2
+  start_sample: 0
+  end_sample: 10
+  base_start_sample: 10
+  base_end_sample: 50
+
+sampler:
+  self_recurrence: 0
+  self_recurrence_every_n_steps: 0
+  enforce_same_norms: False    # True
+  guidance: "projected"
+  cone_projection_type: "zero_binning"
+  classifier_lambda: 1.1 #3.3       # 2.3
+  dist_lambda: 0.0            # 0.3
+  masked_guidance: False
+  backprop_diffusion: True   
+  lp_custom: 0                # 1 -> distance score
+  deg_cone_projection: 20.    # 45.

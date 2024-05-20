@@ -1,0 +1,47 @@
+resume: False
+fixed_seed: False
+record_intermediate: False
+output_dir: /results/counterfactuals/flowers_vgg16bn_40_concept_10
+
+diffusion_model:
+  cfg_path: "configs/stable-diffusion/v1-inference.yaml"
+  ckpt_path: "/Data/models/miniSD/miniSD.ckpt" # miniSD https://huggingface.co/justinpinkney/miniSD/tree/main
+
+classifier_model:
+  name: "vgg16_bn"      # vgg16   vgg16_bn  resnet18  resnet50
+  classifier_path: "/results/models/vgg16bn_flowers_20240503_122623_78_0.870"
+
+concept_layer: features.40    # 29  # features.37 # features.40  layer4.1.conv1  layer3.1.conv1
+num_concepts: 10  # 6
+spatial: True     # False True
+cond_option: sumabs     # abssum absmax
+
+
+n_samples_per_class: #2
+strength: 0.5 #0.322 #0.382 #0.34 #0.3 #28 #0.25
+scale: 3 #2.45 #2.85
+ddim_steps: 500 #500 #375 
+ddim_eta: 0.
+log_rate: 1
+shuffle: False
+
+data:
+  _target_: data.datasets.Flowers102
+  root: "/Data/flowers"
+  batch_size: 4
+  shard: 0
+  num_shards: 10
+  # batch_size: 1
+
+sampler:
+  self_recurrence: 0
+  self_recurrence_every_n_steps: 0
+  enforce_same_norms: True
+  guidance: "projected"
+  cone_projection_type: "zero_binning"
+  classifier_lambda: 3.3 # 3.4 #3.3
+  dist_lambda: 0.1 # 0.01 # 1.2
+  masked_guidance: False
+  backprop_diffusion: True   
+  lp_custom: 1
+  deg_cone_projection: 35. #45.
