@@ -21,8 +21,8 @@ def set_seed(seed: int = 0):
 
 # Model helpers
 def get_classifier(cfg, device):
+    classifier_name = cfg.classifier_model.name
     if "ImageNet" in cfg.data._target_:
-        classifier_name = cfg.classifier_model.name
         if classifier_name == "robust_resnet50":
             classifier_model = MadryNet(cfg.classifier_model.ckpt, device)
             if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
@@ -31,6 +31,21 @@ def get_classifier(cfg, device):
             classifier_model = getattr(torchvision.models, classifier_name)(pretrained=True)
             if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
                 classifier_model = CropAndNormalizer(classifier_model)
+    elif "Flowers" in cfg.data._target_:
+        weights_path = "/results/models/vgg16bn_flowers_20240503_122623_78_0.870"
+        classifier_model = getattr(torchvision.models, classifier_name)(pretrained=True)
+        num_ftrs = classifier_model.classifier[6].in_features
+        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 103)
+        classifier_model.load_state_dict(torch.load(weights_path))
+        classifier_model.to(device)
+
+    elif "Pets" in cfg.data._target_:
+        weights_path = "/results/models/vgg16bn_pets_20240503_092321_7_0.92"
+        classifier_model = getattr(torchvision.models, classifier_name)(pretrained=True)
+        num_ftrs = classifier_model.classifier[6].in_features
+        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 37)
+        classifier_model.load_state_dict(torch.load(weights_path))
+        classifier_model.to(device)
     else:
         raise NotImplementedError
     return classifier_model

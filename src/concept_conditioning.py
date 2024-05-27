@@ -50,9 +50,14 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
     grad = layer.output.grad.detach()
     print(f'Layer output grad size: {grad.size()} in layer {layer_name} {type(layer)}')
 
+    print(type(model))
+
     # Extract most important channels based on the selected cond_option
     if cond_option == "sumabs":
-        channel_grads = grad.cpu().sum((2,3)).numpy()
+        if len(grad.size()) == 4:
+            channel_grads = grad.cpu().sum((2,3)).numpy()
+        else:
+            channel_grads = grad.cpu()[:,0,:].numpy()
         conditions = [np.argsort(np.abs(cg))[-num_concepts:] for cg in channel_grads]
         conditions = np.array(conditions)
 

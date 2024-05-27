@@ -85,7 +85,7 @@ def get_dataset(cfg, last_data_idx: int = 0):
 
 def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx, base_label, cf_label, attr="relevance"):
 
-    if cfg.classifier_model.name == 'vgg16_bn':
+    if cfg.classifier_model.name == 'vgg16_bn' and "ImageNet" in cfg.data._target_:
         fv_path = '/results/counterfactuals/fv_imagenet_vgg16bn'
     else:
         if "ImageNet" in cfg.data._target_:
@@ -95,6 +95,7 @@ def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx,
         elif "Pets" in cfg.data._target_:
             fv_path = f'/results/counterfactuals/fv_pets_{cfg.classifier_model.name}'
 
+    print(fv_path)
 
     attribution = CondAttribution(model)
     canonizers = [SequentialMergeBatchNorm()]
@@ -131,8 +132,15 @@ def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx,
         else:
             ref_t = fv.get_stats_reference(concept, layer, [base_label], attr, (0, 8), rf=True, composite=composite, plot_fn=vis_opaque_img)
         ref_t_all.update(ref_t)
+    print(ref_t_all)
+    print(concept_diff)
     plot_grid(ref_t_all, concept_diff=concept_diff, figsize=(6, 9), padding=False)
-    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
+    if "ImageNet" in cfg.data._target_:
+        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
+    elif "Flowers" in cfg.data._target_:
+        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'flowers_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
+    elif "Pets" in cfg.data._target_:
+        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'pets_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
     plt.close()
 
 
@@ -220,19 +228,32 @@ def main(cfg : DictConfig) -> None:
             os.chmod(os.path.join(out_dir, "config.yaml"), 0o555)
     
     ref_cfg_dict = {
-        'data': {
-            '_target_': 'data.datasets.ImageNet',
-            'root': '/Data/imagenet/val',
-            'idx_to_tgt_cls_path': './ldce/data/image_idx_to_tgt.yaml',
-            'split': 'val',
-            'return_tgt_cls': False,
-            # 'batch_size': 4
-            'start_sample': 10,
-            'end_sample': 50
-            }
+        'data': dict(cfg['data'])
     }
+    if "ImageNet" in cfg.data._target_:
+        ref_cfg_dict['data'].update({"return_tgt_cls": False})
+        ref_cfg_dict['data']['start_sample'] = 10
+        ref_cfg_dict['data']['end_sample'] = 50
+    else:
+        ref_cfg_dict['data'].update({"return_index": False})
+    #     ref_cfg_dict['data'].update({"start_sample": 1})
+    print(ref_cfg_dict["data"])
+
+    # ref_cfg_dict = {
+    #     'data': {
+    #         '_target_': 'data.datasets.ImageNet',
+    #         'root': '/Data/imagenet/val',
+    #         'idx_to_tgt_cls_path': './ldce/data/image_idx_to_tgt.yaml',
+    #         'split': 'val',
+    #         'return_tgt_cls': False,
+    #         # 'batch_size': 4
+    #         'start_sample': 10,
+    #         'end_sample': 50
+    #         }
+    # }
     ref_cfg = OmegaConf.create(ref_cfg_dict)
     ref_dataset = get_dataset(ref_cfg)
+    print("ref dataset length: ", len(ref_dataset))
 
     #data_path = cfg.data_path
     dataset = get_dataset(cfg, last_data_idx=last_data_idx)
@@ -290,23 +311,23 @@ def main(cfg : DictConfig) -> None:
 
     for i, batch in enumerate(data_loader):
 
-        if "fixed_seed" in cfg:
-            set_seed(seed=cfg.get("seed", 0)) if cfg.fixed_seed else None
-            seed = seed if cfg.fixed_seed else -1
+        # if "fixed_seed" in cfg:
+        #     set_seed(seed=cfg.get("seed", 0)) if cfg.fixed_seed else None
+        #     seed = seed if cfg.fixed_seed else -1
             
-        if "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
-            image, label, tgt_classes, unique_data_idx = batch
-            tgt_classes = tgt_classes.to(device) #squeeze()
-        else:
-            image, label, unique_data_idx = batch
-            if "ImageNet" in cfg.data._target_:
-                tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
-            elif "CelebAHQDataset" in cfg.data._target_:
-                tgt_classes = (1 - label).type(torch.float32)
-            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
-                tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
-            else:
-                raise NotImplementedError
+        # if "return_tgt_cls" in cfg.data and cfg.data.return_tgt_cls:
+        #     image, label, tgt_classes, unique_data_idx = batch
+        #     tgt_classes = tgt_classes.to(device) #squeeze()
+        # else:
+        image, label, unique_data_idx = batch
+        #     if "ImageNet" in cfg.data._target_:
+        #         tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
+        #     elif "CelebAHQDataset" in cfg.data._target_:
+        #         tgt_classes = (1 - label).type(torch.float32)
+        #     elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
+        #         tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
+        #     else:
+        #         raise NotImplementedError
 
 
         # image = image.to(device) #squeeze()
@@ -323,7 +344,7 @@ def main(cfg : DictConfig) -> None:
         for j in range(batch_size):
             # Read conditions from file
             if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
-                    uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
+                uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
             else:
                 uidx = unique_data_idx[j].item()
 
@@ -331,13 +352,30 @@ def main(cfg : DictConfig) -> None:
 
             data_dict = torch.load(dict_save_path, map_location="cpu")
 
+            # print(data_dict['source'])
+            # print(label)
             source_pred = data_dict['in_pred']
-            source_pred = list(name_map.keys())[list(name_map.values()).index(source_pred)]
+            # print(name_map)
+            # print(source_pred)
+            # source_pred = list(name_map.keys())[list(name_map.values()).index(source_pred)]
+            source_pred = list(i2h.keys())[list(i2h.values()).index(source_pred)]
             # class_source = torch.tensor([class_source], device=device)
+            # print(source_pred)
+            # print(i2h[source_pred])
+
 
             target = data_dict['target']
-            class_target = list(name_map.keys())[list(name_map.values()).index(target)]
+            # print(target)
+            # class_target = list(name_map.keys())[list(name_map.values()).index(target)]
+            class_target = list(i2h.keys())[list(i2h.values()).index(target)]
             # class_target = torch.tensor([class_target], device=device)
+            # print(class_target)
+            
+            # raise ValueError
+
+            # if "Flowers102" in cfg.data._target_:
+            #     source_pred = source_pred - 1
+            #     class_target = class_target - 1
 
             if 'conditions' in data_dict:
                 conditions = data_dict['conditions']

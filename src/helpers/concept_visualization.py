@@ -225,25 +225,26 @@ def plot_grid(ref_c: Dict[int, Any], concept_diff=None, cmap_dim=1, cmap="bwr", 
                 img_list = ref_c[keys[i]]
             
             for c in range(ncols):
-                ax = plt.Subplot(fig, inner[sr, c])
+                if c < len(img_list):
+                    ax = plt.Subplot(fig, inner[sr, c])
 
-                if sr == cmap_dim:
-                    img = imgify(img_list[c], cmap=cmap, vmin=vmin, vmax=vmax, symmetric=symmetric, resize=resize, padding=padding)
-                else:
-                    img = imgify(img_list[c], resize=resize, padding=padding)
-
-                ax.imshow(img)
-                ax.set_xticks([])
-                ax.set_yticks([])
-
-                if sr == 0 and c == 0:
-                    if isinstance(concept_diff, np.ndarray):
-                        ax.set_ylabel(f'{keys[i]}\n{concept_diff[i]:.4f}')
+                    if sr == cmap_dim:
+                        img = imgify(img_list[c], cmap=cmap, vmin=vmin, vmax=vmax, symmetric=symmetric, resize=resize, padding=padding)
                     else:
-                        # print(f'concept_diff is of type {type(concept_diff)}')
-                        ax.set_ylabel(keys[i])
+                        img = imgify(img_list[c], resize=resize, padding=padding)
 
-                fig.add_subplot(ax)
+                    ax.imshow(img)
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+
+                    if sr == 0 and c == 0:
+                        if isinstance(concept_diff, np.ndarray):
+                            ax.set_ylabel(f'{keys[i]}\n{concept_diff[i]:.4f}')
+                        else:
+                            # print(f'concept_diff is of type {type(concept_diff)}')
+                            ax.set_ylabel(keys[i])
+
+                    fig.add_subplot(ax)
                 
     outer.tight_layout(fig)  
     fig.show()

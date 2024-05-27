@@ -149,104 +149,104 @@ def show_localization_constraints(model, image, conditions, cinds, concept_layer
             ax[d].axis('off')
 
         plt.tight_layout()
-        plt.savefig(f'/results/counterfactuals/localization/{concept_layer}_{str(start_idx + i).zfill(5)}_localization.svg')
+        plt.savefig(f'/results/counterfactuals/localization/flowers_{concept_layer}_{str(start_idx + i).zfill(5)}_localization.svg')
         plt.close()
 
         # model = copy.deepcopy(model_original)
 
 
-        fig, ax = plt.subplots(1, len(inds) + 1, figsize=(12, 4))
-        ax[0].imshow(zennit.image.imgify(img.cpu()))
+        # fig, ax = plt.subplots(1, len(inds) + 1, figsize=(12, 4))
+        # ax[0].imshow(zennit.image.imgify(img.cpu()))
 
-        for d, ind in enumerate(inds):
+        # for d, ind in enumerate(inds):
 
-            # print(cond.size())
-            # print(cond[ind].size())
-            t = cond[ind].cpu()
+        #     # print(cond.size())
+        #     # print(cond[ind].size())
+        #     t = cond[ind].cpu()
 
-            # compute gradient
-            # model = model.train()
+        #     # compute gradient
+        #     # model = model.train()
 
-            # for module in model.modules():
-            # #     # skip errors on container modules, like nn.Sequential
-            #     try:
-            # #         # Make all convolution weights equal.
-            # #         # Set all biases to zero.
-            #         nn.init.constant_(module.weight, 0.05)
-            #         nn.init.zeros_(module.bias)
+        #     # for module in model.modules():
+        #     # #     # skip errors on container modules, like nn.Sequential
+        #     #     try:
+        #     # #         # Make all convolution weights equal.
+        #     # #         # Set all biases to zero.
+        #     #         nn.init.constant_(module.weight, 0.05)
+        #     #         nn.init.zeros_(module.bias)
             
-            # #         # Set BatchNorm means to zeros, 
-            # #         # variances - to 1.
-            #         nn.init.zeros_(module.running_mean)
-            #         nn.init.ones_(module.running_var)
-            #     except:
-            #         pass
+        #     # #         # Set BatchNorm means to zeros, 
+        #     # #         # variances - to 1.
+        #     #         nn.init.zeros_(module.running_mean)
+        #     #         nn.init.ones_(module.running_var)
+        #     #     except:
+        #     #         pass
 
-            #     # # Freeze the BatchNorm stats. 
-            #     if isinstance(module, torch.nn.modules.BatchNorm2d):
-            #         module.eval()
+        #     #     # # Freeze the BatchNorm stats. 
+        #     #     if isinstance(module, torch.nn.modules.BatchNorm2d):
+        #     #         module.eval()
 
-            return_nodes = {
-                "features.40": "layer4"
-            }
-            model2 = create_feature_extractor(model, return_nodes=return_nodes)
-            # intermediate_outputs = model2(x)
+        #     return_nodes = {
+        #         "features.40": "layer4"
+        #     }
+        #     model2 = create_feature_extractor(model, return_nodes=return_nodes)
+        #     # intermediate_outputs = model2(x)
 
-            input = torch.ones_like(img)
-            input = F.center_crop(input, 224)
-            input.requires_grad = True
-            # out = model(input[None])
-            intermediate_outputs = model2(input[None])
+        #     input = torch.ones_like(img)
+        #     input = F.center_crop(input, 224)
+        #     input.requires_grad = True
+        #     # out = model(input[None])
+        #     intermediate_outputs = model2(input[None])
 
-            # # Set the gradient to 0.
-            # # Only set the pixel of interest to 1.
-            # print(cond.size())
-            grad = torch.zeros_like(cond, requires_grad=False)[None]
-            # print(grad.size())
-            grad[0, ind, :, :] = cond[ind]
+        #     # # Set the gradient to 0.
+        #     # # Only set the pixel of interest to 1.
+        #     # print(cond.size())
+        #     grad = torch.zeros_like(cond, requires_grad=False)[None]
+        #     # print(grad.size())
+        #     grad[0, ind, :, :] = cond[ind]
 
-            grad.requires_grad = True
+        #     grad.requires_grad = True
 
-            # # Run the backprop.
-            intermediate_outputs['layer4'].backward(gradient=grad)
+        #     # # Run the backprop.
+        #     intermediate_outputs['layer4'].backward(gradient=grad)
             
-            # # Retrieve the gradient of the input image.
-            # gradient_of_input = input.grad[0, 0].data.numpy()
-            input_grad = input.grad.data.cpu().numpy()
+        #     # # Retrieve the gradient of the input image.
+        #     # gradient_of_input = input.grad[0, 0].data.numpy()
+        #     input_grad = input.grad.data.cpu().numpy()
 
-            # # Normalize the gradient.
-            # gradient_of_input = gradient_of_input / np.amax(gradient_of_input)
-            input_grad = input_grad / np.amax(input_grad)
+        #     # # Normalize the gradient.
+        #     # gradient_of_input = gradient_of_input / np.amax(gradient_of_input)
+        #     input_grad = input_grad / np.amax(input_grad)
 
-            # def normalize(activations):
-            #     # transform activations so that all the values be in range [0, 1]
-            #     activations = activations - np.min(activations)
-            #     activations = activations / np.max(activations)
-            #     return activations
+        #     # def normalize(activations):
+        #     #     # transform activations so that all the values be in range [0, 1]
+        #     #     activations = activations - np.min(activations)
+        #     #     activations = activations / np.max(activations)
+        #     #     return activations
             
             
-            def visualize_activations(image, activations):
-                # activations = normalize(activations)
-                activations = activations / np.linalg.norm(activations)
+        #     def visualize_activations(image, activations):
+        #         # activations = normalize(activations)
+        #         activations = activations / np.linalg.norm(activations)
             
-                # replicate the activations to go from 1 channel to 3
-                # as we have colorful input image
-                # we could use cvtColor with GRAY2BGR flag here, but it is not
-                # safe - our values are floats, but cvtColor expects 8-bit or
-                # 16-bit integers
-                # activations = np.stack([activations, activations, activations], axis=2)
-                masked_image = (image * activations * 255).astype(np.uint8)
+        #         # replicate the activations to go from 1 channel to 3
+        #         # as we have colorful input image
+        #         # we could use cvtColor with GRAY2BGR flag here, but it is not
+        #         # safe - our values are floats, but cvtColor expects 8-bit or
+        #         # 16-bit integers
+        #         # activations = np.stack([activations, activations, activations], axis=2)
+        #         masked_image = (image * activations * 255).astype(np.uint8)
                 
-                return masked_image
+        #         return masked_image
 
-            input_grad = visualize_activations(input.cpu().detach().numpy(), input_grad)
+        #     input_grad = visualize_activations(input.cpu().detach().numpy(), input_grad)
 
-            ax[d+1].imshow(zennit.image.imgify(input_grad))
-            ax[1 + d].set_title(ind)
-            # ax[d+1].imshow(input_grad.transpose((1,2,0)))
+        #     ax[d+1].imshow(zennit.image.imgify(input_grad))
+        #     ax[1 + d].set_title(ind)
+        #     # ax[d+1].imshow(input_grad.transpose((1,2,0)))
 
-        plt.savefig(f'/results/counterfactuals/localization/input_grad_{start_idx + i}.png')
-        plt.close()
+        # plt.savefig(f'/results/counterfactuals/localization/input_grad_{start_idx + i}.png')
+        # plt.close()
 
 
 @hydra.main(version_base=None, config_path="../../configs/ldce", config_name="v1")
@@ -301,6 +301,20 @@ def main(cfg : DictConfig) -> None:
     # model = get_model(cfg_path=cfg.diffusion_model.cfg_path, ckpt_path = cfg.diffusion_model.ckpt_path).to(device).eval()
     
     classifier_model = get_classifier(cfg, device)
+
+    if "Flowers102" in cfg.data._target_:
+        weights_path = "/results/models/vgg16bn_flowers_20240503_122623_78_0.870"
+        num_ftrs = classifier_model.classifier[6].in_features
+        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 103)
+        classifier_model.load_state_dict(torch.load(weights_path))
+        # classifier_model.to(device)
+    elif "OxfordIIIPets" in cfg.data._target_:
+        weights_path = "/results/models/vgg16bn_pets_20240503_092321_7_0.92"
+        num_ftrs = classifier_model.classifier[6].in_features
+        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 37)
+        classifier_model.load_state_dict(torch.load(weights_path))
+        # model.to(device)
+
     classifier_model.to(device).eval()
     # classifier_model.train = disabled_train
 
@@ -351,29 +365,31 @@ def main(cfg : DictConfig) -> None:
     #         i2h = ["old", "young"]
     #     else:
     #         raise NotImplementedError
-    # elif "Flowers102" in cfg.data._target_:
-    #     with open("data/flowers_idx_to_label.json", "r") as f:
-    #         flowers_idx_to_classname = json.load(f)
-    #     flowers_idx_to_classname = {int(k)-1: v for k, v in flowers_idx_to_classname.items()}
-    #     i2h = flowers_idx_to_classname
-    # elif "OxfordIIIPets" in cfg.data._target_:
-    #     with open("data/pets_idx_to_label.json", "r") as f:
-    #         pets_idx_to_classname = json.load(f)
-    #     i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
+    elif "Flowers102" in cfg.data._target_:
+        with open("data/flowers_idx_to_label.json", "r") as f:
+            flowers_idx_to_classname = json.load(f)
+        flowers_idx_to_classname = {int(k)-1: v for k, v in flowers_idx_to_classname.items()}
+        i2h = flowers_idx_to_classname
+    elif "OxfordIIIPets" in cfg.data._target_:
+        with open("data/pets_idx_to_label.json", "r") as f:
+            pets_idx_to_classname = json.load(f)
+        i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
     else:
         raise NotImplementedError
 
     if "ImageNet" in cfg.data._target_:
         with open('data/synset_closest_idx.yaml', 'r') as file:
             synset_closest_idx = yaml.safe_load(file)
-    # elif "Flowers102" in cfg.data._target_:
-    #     with open("data/flowers_closest_indices.json") as file:
-    #         closest_indices = json.load(file)
-    #     closest_indices = {int(k):v for k,v in closest_indices.items()}
-    # elif "OxfordIIIPets" in cfg.data._target_:
-    #     with open("data/pets_closest_indices.json") as file:
-    #         closest_indices = json.load(file)
-    #     closest_indices = {int(k):v for k,v in closest_indices.items()}
+    elif "Flowers102" in cfg.data._target_:
+        with open("data/flowers_closest_indices.json") as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
+        num_classes = 103
+    elif "OxfordIIIPets" in cfg.data._target_:
+        with open("data/pets_closest_indices.json") as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
+        num_classes = 37
 
     concept_layer = cfg.concept_layer       # "backbone.features.29"
     spatial = cfg.spatial
@@ -399,6 +415,7 @@ def main(cfg : DictConfig) -> None:
             image, label, unique_data_idx = batch
             if "ImageNet" in cfg.data._target_:
                 tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
+                num_classes = 1000
             elif "CelebAHQDataset" in cfg.data._target_:
                 tgt_classes = (1 - label).type(torch.float32)
             elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
@@ -432,9 +449,9 @@ def main(cfg : DictConfig) -> None:
         # Compute concept conditions
         # ToDo: add sampler.classifier_wrapper as parameter
         if spatial:
-            conditions, concept_conds, concept_diff, grad = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, spatial=spatial, cond_option=cond_option, return_gradient=True)
+            conditions, concept_conds, concept_diff, grad = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, num_classes=num_classes, spatial=spatial, cond_option=cond_option, return_gradient=True)
         else:
-            conditions, concept_conds, concept_diff, grad = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, cond_option=cond_option, return_gradient=True)
+            conditions, concept_conds, concept_diff, grad = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, num_classes=num_classes, cond_option=cond_option, return_gradient=True)
 
         # print(conditions)
         # print(conditions.keys())

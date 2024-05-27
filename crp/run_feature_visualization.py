@@ -170,7 +170,7 @@ elif data_name == "flowers":
             'return_tgt_cls': False,
             'return_index': False,
             'shard': 0,
-            'num_shards': 10,
+            'num_shards': 1,
         }
 #   'batch_size': 4
     }
