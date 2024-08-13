@@ -44,5 +44,7 @@ COPY src/ ./src
 COPY crp/ ./crp
 
 # CMD ["python", "crp/run_feature_visualization.py"]
-CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_concept"]
+# CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_concept"]
+# CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_pets"]
+CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_flowers"]
 # CMD ["python", "src/visualization/visualize_conditioning.py", "--config-name=v1_concept"]

@@ -1,0 +1,107 @@
+resume: False    # False True
+fixed_seed: False
+record_intermediate: False
+output_dir: /results/dvce/imagenet_vgg16bn_40_concept_20_optim
+
+diffusion_model:
+  cfg_path: "configs/latent-diffusion/cin256-v2.yaml"
+  ckpt_path: "models/ldm/nitro_cin/model.ckpt"
+
+seg_model:
+classifier_model:
+  name: "vgg16_bn"      # vgg16   vgg16_bn  resnet18  resnet50
+
+counterfactual_target: attribution # actattr attribution activation baseline
+target_norm: False   # False True
+
+concept_layer: features.40    # 29  # features.37 # features.40  layer4.1.conv1  layer3.1.conv1
+num_concepts: 20  # 6
+spatial: False     # False True
+optim: False
+cond_option: sumabs     # abssum absmax
+
+model_output_size: 256
+timestep_respacing: '200'
+skip_timesteps: 100              # 100
+clip_guidance_lambda: 0
+classifier_lambda: 0.03          # 0.1
+
+deg_cone_projection: 30
+
+enforce_same_norms: true
+
+not_use_init_image: false
+local_clip_guided_diffusion: false
+range_t: 0
+eps_project: 0
+ilvr_multi: 
+denoise_dist_input: false
+
+# sampling:
+  # noise_first: false
+  # clamp: false
+config: '/workspace/DVCEs/blended_diffusion/configs/imagenet1000.yml'
+script_type: "dvce"
+consistent:
+step_lr:
+nsigma:
+batch_size: 4
+model_types:
+ODI_steps:
+projecting_cone: true
+quantile_cut: 0
+layer_reg: false
+
+lp_custom: 1.0
+lp_custom_value: 0.15
+lpips_sim_lambda: 0
+l2_sim_lambda: 0
+l1_sim_lambda: 0
+range_lambda: 0
+
+classifier_type: 3
+second_classifier_type: -2
+third_classifier_type: -1
+
+classifier_size_1: 224
+interpolation_int_1: 0
+classifier_size_2: 224
+interpolation_int_2: 0
+model_epoch_num:
+
+aug_num: 1
+gen_type: 'p_sample'
+use_blended: false
+
+project_folder: /results/dvce
+data_folder: /Data/
+
+n_samples_per_class: #2
+strength: 0.382 #0.322 #0.382 #0.34 #0.3 #28 #0.25
+scale: 3 #2.45 #2.85
+ddim_steps: 500 #500 #375 
+ddim_eta: 0.
+log_rate: 1
+
+data:
+  _target_: data.datasets.ImageNet
+  root: '/Data/imagenet/val'
+  idx_to_tgt_cls_path: './ldce/data/image_idx_to_tgt.yaml'
+  split: 'val'
+  return_tgt_cls: True
+  batch_size: 4
+  start_sample: 0
+  end_sample: 10
+
+sampler:
+  self_recurrence: 0
+  self_recurrence_every_n_steps: 0
+  enforce_same_norms: True
+  guidance: "projected"
+  cone_projection_type: "zero_binning"
+  classifier_lambda: 2.3 # 2.3 #3.3
+  dist_lambda: 0.01 #0.3 # 0.3
+  masked_guidance: False
+  backprop_diffusion: True   
+  lp_custom: 1
+  deg_cone_projection: 45. # 45.

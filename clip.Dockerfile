@@ -28,7 +28,8 @@ RUN git clone https://github.com/lmb-freiburg/ldce.git
 
 RUN pip3 install --upgrade certifi
 COPY ca-certificates /usr/local/share/ca-certificates
-RUN apt-get install --yes --no-install-recommends software-properties-common ca-certificates
+RUN apt-get install --yes --no-install-recommends ca-certificates
+# software-properties-common
 # RUN chmod 644 /usr/local/share/ca-certificates/continental.crt
 # RUN chmod 644 /usr/local/share/ca-certificates/conti-corp-it-security.crt
 RUN update-ca-certificates

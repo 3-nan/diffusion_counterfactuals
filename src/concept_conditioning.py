@@ -1,9 +1,11 @@
 """ Functionality for deriving conditioning to single concepts in the gradient backward pass. """
+import sys
 import numpy as np
 import torch
 import torchvision.transforms.functional as tf
 import zennit
-from ldce.sampling_helpers import normalize
+sys.path.append("./")
+from src.sampling_helpers import normalize
 
 
 def store_hook(module, input, output):
@@ -29,8 +31,8 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
 
     assert layer
 
-    target_tensor = torch.eye(num_classes)[target]
-    target_tensor = target_tensor.to(image.device)
+    target_tensor = torch.eye(num_classes, device=image.device)[target]
+    # target_tensor = target_tensor.to(image.device)
 
     # Get gradient in specified layer
     with zennit.attribution.Gradient(model=model) as attributor:

@@ -13,7 +13,7 @@ sys.path.append('./ldce')
 from crp import get_concept_attribution
 from helpers.data_model_helpers import get_dataset, get_classifier
 from encode_dataset import append_attributions_to_attribution_database
-from representations import compute_layer_attributions
+from src.latent_representation.representations import compute_layer_attributions
 
 
 @hydra.main(version_base=None, config_path="../configs/ldce", config_name="v1")
