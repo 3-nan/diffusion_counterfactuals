@@ -145,20 +145,20 @@ def get_dataset(cfg, last_data_idx: int = 0):
         ]
         transform = transforms.Compose(transform_list)
         dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
-    # elif "CelebAHQDataset" in cfg.data._target_:
-    #     dataset = instantiate(
-    #         cfg.data,
-    #         image_size=256, 
-    #         data_dir=cfg.data.data_dir, 
-    #         random_crop=False, 
-    #         random_flip=False, 
-    #         partition='test',
-    #         query_label=cfg.data.query_label,
-    #         normalize=False,
-    #         shard=cfg.data.shard,
-    #         num_shards=cfg.data.num_shards,
-    #         restart_idx=last_data_idx
-    #     )
+    elif "CelebAHQDataset" in cfg.data._target_:
+        dataset = instantiate(
+            cfg.data,
+            image_size=256, 
+            data_dir=cfg.data.data_dir, 
+            random_crop=False, 
+            random_flip=False, 
+            partition='test',
+            query_label=cfg.data.query_label,
+            normalize=False,
+            shard=cfg.data.shard,
+            num_shards=cfg.data.num_shards,
+            restart_idx=last_data_idx
+        )
     elif "Flowers102" in cfg.data._target_:
         transform = transforms.Compose([
             transforms.Resize((256, 256)),
@@ -292,16 +292,20 @@ def main(cfg : DictConfig) -> None:
     if "ImageNet" in cfg.data._target_:
         i2h = name_map
         num_classes = 1000
-    # elif "CelebAHQDataset" in cfg.data._target_:
-    #     # query label 31 (smile): label=0 <-> no smile and label=1 <-> smile
-    #     # query label 39 (age): label=0 <-> old and label=1 <-> young
-    #     assert cfg.data.query_label in [31, 39]
-    #     if 31 == cfg.data.query_label:
-    #         i2h = ["no smile", "smile"]
-    #     elif 39 == cfg.data.query_label:
-    #         i2h = ["old", "young"]
-    #     else:
-    #         raise NotImplementedError
+    elif "CelebAHQDataset" in cfg.data._target_:
+        # query label 31 (smile): label=0 <-> no smile and label=1 <-> smile
+        # query label 39 (age): label=0 <-> old and label=1 <-> young
+        assert cfg.data.query_label in [2, 4, 31, 39]
+        if 31 == cfg.data.query_label:
+            i2h = ["no smile", "smile"]
+        elif 39 == cfg.data.query_label:
+            i2h = ["old", "young"]
+        elif 2 == cfg.data.query_label:
+            i2h = ["not attractive", "attractive"]
+        elif 4 == cfg.data.query_label:
+            i2h = ["not bald", "bald"]
+        else:
+            raise NotImplementedError
     elif "Flowers102" in cfg.data._target_:
         with open("data/flowers_idx_to_label.json", "r") as f:
             flowers_idx_to_classname = json.load(f)

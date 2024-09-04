@@ -1,209 +1,23 @@
-import argparse
 import os
-# import psutil
 import yaml
 import copy
-import random
-import sys
-sys.path.append("./")
-sys.path.append("./ldce")
-
-# import matplotlib.pyplot as plt
-import numpy as np
-import pathlib
-
-
-import torch
-torch.backends.cuda.matmul.allow_tf32 = True
-# torch.backends.cudnn.benchmark = True
-# from contextlib import nullcontext
-from torch import autocast
-
-from omegaconf import OmegaConf, open_dict, DictConfig
-import hydra
-from hydra.utils import instantiate
-# import wandb
-import torchvision
-from torchvision import transforms, datasets
-from torchvision.utils import save_image
-import timm
-
-from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
-from src.sampling_helpers import load_model_hf
 import json
-
-
-import sys
-import regex as re
-# from ldce.ldm import *
-# from ldce.ldm.models.diffusion.cc_ddim import CCMDDIMSampler
-from src.ldm.cc_ddim import CCMDDIMSampler
+import hydra
+import pathlib
+import random
+import numpy as np
+from omegaconf import DictConfig, OmegaConf, open_dict
+from torchvision.utils import save_image
+import torch
+from diffusers import StableDiffusionImg2ImgPipeline
 
 from ldce.data.imagenet_classnames import name_map, openai_imagenet_classes
-
-# try:
-#     import open_clip
-# except:
-#     print("Install OpenClip via: pip install open_clip_torch")
-
-# from utils.DecisionDensenetModel import DecisionDensenetModel
-from ldce.utils.preprocessor import Normalizer, CropAndNormalizer, ResizeAndNormalizer, GenericPreprocessing, Crop
-# from utils.vision_language_wrapper import VisionLanguageWrapper
-from ldce.utils.madry_net import MadryNet
-# from utils.dino_linear import LinearClassifier, DINOLinear
-
-def set_seed(seed: int = 0):
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-def blockPrint():
-    sys.stdout = open(os.devnull, 'w')
-
-class LabelQuery(torch.nn.Module):
-    '''
-    normalizing module. Useful for computing the gradient
-    to a x image (x in [0, 1]) when using a classifier with
-    different normalization inputs (i.e. f((x - mu) / sigma))
-    '''
-    def __init__(self, classifier, query_label):
-        super().__init__()
-        self.classifier = classifier
-        self.query_label = query_label
-
-    def forward(self, x):
-        return torch.sigmoid(self.classifier(x))[:, self.query_label]
-
-def get_classifier(cfg, device):
-    if "ImageNet" in cfg.data._target_:
-        classifier_name = cfg.classifier_model.name
-        if classifier_name == "robust_resnet50":
-            classifier_model = MadryNet(cfg.classifier_model.ckpt, device)
-            if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
-                classifier_model = Crop(classifier_model)
-        else:
-            classifier_model = getattr(torchvision.models, classifier_name)(pretrained=True)
-            if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
-                classifier_model = CropAndNormalizer(classifier_model)
-    elif "CelebAHQDataset" in cfg.data._target_ or "CelebA" in cfg.data._target_:
-        assert cfg.data.query_label in [2, 4, 20, 31, 39], 'Query label MUST be 20 (Gender), 31 (Smile), or 39 (Age) for CelebAHQ'
-        classifier_name = cfg.classifier_model.name
-
-        classifier_model = timm.create_model(classifier_name, pretrained=False, num_classes=40) #.to(device)
-        # classifier_model = getattr(torchvision.models, classifier_name)()
-        # num_ftrs = classifier_model.classifier[6].in_features
-        # classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 40)
-        state_dict = torch.load(cfg.classifier_model.classifier_path)
-        print(state_dict.keys())
-        classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
-
-        classifier_model = LabelQuery(classifier_model, cfg.data.query_label)
+from run_ldce_baseline import set_seed, get_dataset, get_classifier, blockPrint
+from pipeline import ModifiedStableDiffusionImg2ImgPipeline
+from kandinsky_pipeline import ModifiedKandinskyImg2ImgPipeline
 
 
-    elif "Flowers102" in cfg.data._target_:
-        classifier_name = cfg.classifier_model.name
-
-        classifier_model = getattr(torchvision.models, classifier_name)()
-        num_ftrs = classifier_model.classifier[6].in_features
-        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 103)
-        state_dict = torch.load(cfg.classifier_model.classifier_path)
-        print(state_dict.keys())
-        classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
-    #     # fine-tuned Dino ViT B/8: https://arxiv.org/pdf/2104.14294.pdf
-    #     dino = torch.hub.load('facebookresearch/dino:main', 'dino_vits8').to(device).eval()
-    #     dim = dino.embed_dim
-    #     linear_classifier = LinearClassifier(dim*cfg.classifier_model.n_last_blocks, 102)
-    #     linear_classifier.load_state_dict(torch.load(cfg.classifier_model.classifier_path, map_location="cpu"), strict=True)
-    #     linear_classifier = linear_classifier.eval().to(device)
-    #     classifier_model = DINOLinear(dino, linear_classifier)
-    #     transforms_list = [transforms.CenterCrop(224), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))]
-    #     classifier_model = GenericPreprocessing(classifier_model, transforms.Compose(transforms_list))
-    elif "OxfordIIIPets" in cfg.data._target_:
-        classifier_name = cfg.classifier_model.name
-
-        classifier_model = getattr(torchvision.models, classifier_name)()
-        num_ftrs = classifier_model.classifier[6].in_features
-        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 37)
-        state_dict = torch.load(cfg.classifier_model.classifier_path)
-        print(state_dict.keys())
-        classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
-    #     # zero-shot OpenClip: https://arxiv.org/pdf/2212.07143.pdf
-    #     model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')
-    #     model = model.to(device).eval()
-    #     tokenizer = open_clip.get_tokenizer('ViT-B-32')
-    #     # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
-    #     with open("data/pets_idx_to_label.json", "r") as f:
-    #         pets_idx_to_classname = json.load(f)
-    #     prompts = [f"a photo of a {label}, a type of pet." for label in pets_idx_to_classname.values()]
-    #     classifier_model = VisionLanguageWrapper(model, tokenizer, prompts)
-    #     # try running optimization on 224x224 pixel image
-    #     # transforms_list = [preprocess.transforms[0], preprocess.transforms[1], preprocess.transforms[4]]
-    #     if cfg.classifier_model.classifier_wrapper:
-    #         transforms_list = [preprocess.transforms[1], preprocess.transforms[4]] # CenterCrop(224, 224), Normalize
-    #         classifier_model = GenericPreprocessing(classifier_model, transforms.Compose(transforms_list))
-    else:
-        raise NotImplementedError
-    return classifier_model
-
-def get_dataset(cfg, last_data_idx: int = 0):
-    if "ImageNet" in cfg.data._target_:
-        out_size = 256
-        transform_list = [
-            transforms.Resize((out_size, out_size)),
-            transforms.ToTensor()
-        ]
-        transform = transforms.Compose(transform_list)
-        dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
-    elif "CelebAHQDataset" in cfg.data._target_ or "CelebA" in cfg.data._target_:
-        dataset = instantiate(
-            cfg.data,
-            image_size=cfg.data.image_size, #256, 
-            data_dir=cfg.data.data_dir, 
-            random_crop=False, 
-            random_flip=False, 
-            partition='test',
-            query_label=cfg.data.query_label,
-            normalize=False,
-            shard=cfg.data.shard,
-            num_shards=cfg.data.num_shards,
-            restart_idx=last_data_idx
-        )
-    elif "Flowers102" in cfg.data._target_:
-        transform = transforms.Compose([
-            transforms.Resize((256, 256)),
-            transforms.ToTensor(),
-        ])
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
-        def _convert_to_rgb(image):
-            return image.convert('RGB')
-        out_size = 256
-        transform_list = [
-            transforms.Resize((out_size, out_size)),
-            # transforms.CenterCrop(out_size),
-            _convert_to_rgb,
-            transforms.ToTensor(),
-        ]
-        transform = transforms.Compose(transform_list)
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    else:
-        raise NotImplementedError
-    return dataset
-
-@hydra.main(version_base=None, config_path="configs/ldce", config_name="v1")
+@hydra.main(version_base=None, config_path="../../configs/ldce", config_name="v1")
 def main(cfg : DictConfig) -> None:
     if "verbose" not in cfg:
         with open_dict(cfg):
@@ -224,6 +38,9 @@ def main(cfg : DictConfig) -> None:
     os.makedirs(out_dir, exist_ok=True)
     os.chmod(out_dir, 0o777)
     checkpoint_path = os.path.join(out_dir, "last_saved_id.pth")
+
+    batch_size = cfg.data.batch_size
+    shuffle = cfg.get("shuffle", False)
 
     config = {}
     if "ImageNet" in cfg.data._target_:
@@ -252,31 +69,37 @@ def main(cfg : DictConfig) -> None:
     # device = torch.device("cpu") # there seems to be a CUDA/autograd instability in gradient computation
     print(f"using device: {device}")
 
-    model = get_model(cfg_path=cfg.diffusion_model.cfg_path, ckpt_path = cfg.diffusion_model.ckpt_path).to(device).eval()
-    
     classifier_model = get_classifier(cfg, device)
     classifier_model.to(device).eval()
-    classifier_model.train = disabled_train
 
-    ddim_steps = cfg.ddim_steps
-    ddim_eta = cfg.ddim_eta
-    scale = cfg.scale #for unconditional guidance
-    strength = cfg.strength #for unconditional guidance
+    # model_id_or_path = "runwayml/stable-diffusion-v1-5"
+    # stabilityai/stable-diffusion-3-medium 
+    # stabilityai/stable-diffusion-xl-base-1.0
 
-    sampler = CCMDDIMSampler(model, classifier_model, seg_model= None, classifier_wrapper="classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper, record_intermediate_results=cfg.record_intermediate_results, verbose=cfg.verbose, **cfg.sampler)
+    diffusion_type = "kandinsky"
 
-    sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=ddim_eta, verbose=False)
+    if diffusion_type == "stable_diffusion":
+        local_model_path = "/results/models/stable-diffusion-v1-4"
+        if os.path.isdir(local_model_path):
+            pipe = ModifiedStableDiffusionImg2ImgPipeline.from_pretrained(local_model_path, variant="fp16", torch_dtype=torch.float16)
+        else:
+            model_id_or_path = "CompVis/stable-diffusion-v1-4"
+            pipe = ModifiedStableDiffusionImg2ImgPipeline.from_pretrained(model_id_or_path, torch_dtype=torch.float16)     #, height=256, width=256) #, torch_dtype=torch.float16)
+            pipe.save_pretrained(local_model_path, variant="fp16")
+        # pipe = pipe.to(device)
+        pipe.enable_model_cpu_offload()
 
-    assert 0. <= strength <= 1., 'can only work with strength in [0.0, 1.0]'
-    t_enc = int(strength * len(sampler.ddim_timesteps))
-    assert len(sampler.ddim_timesteps) == ddim_steps, "ddim_steps should be equal to len(sampler.ddim_timesteps)"
-    n_samples_per_class = cfg.n_samples_per_class
-    batch_size = cfg.data.batch_size
-    shuffle = cfg.get("shuffle", False)
-      
+    elif diffusion_type == "kandinsky":
+        local_model_path = "/results/models/kandinsky-3"
+        if os.path.isdir(local_model_path):
+            pipe = ModifiedKandinskyImg2ImgPipeline.from_pretrained(local_model_path, variant="fp16", torch_dtype=torch.float16, use_safetensors=True)
+        else:
+            model_id_or_path = "kandinsky-community/kandinsky-3"
+            pipe = ModifiedKandinskyImg2ImgPipeline.from_pretrained(model_id_or_path, variant="fp16", torch_dtype=torch.float16, use_safetensors=True)
+            pipe.save_pretrained(local_model_path, variant="fp16")
+        pipe.enable_model_cpu_offload()
+    # pipe = ModifiedStableDiffusionImg2ImgPipeline.from_pretrained("/Data/models/stable-diffusion-v1-5", use_safetensors=True)
 
-    #save config to the output directory
-    #check if the config file already exists else create a config file
     config_path = os.path.join(out_dir, "config.yaml") 
     if os.path.exists(config_path):
         print("config file already exists! skipping ...")
@@ -388,7 +211,10 @@ def main(cfg : DictConfig) -> None:
             if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
                 logits = classifier_model(image)
             else:
-                logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
+                print(f'Img min {torch.min(image)} max {torch.max(image)}')
+                logits = classifier_model(image)
+                # logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
+                # raise NotImplementedError
             # TODO: handle binary vs multi-class
             if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_: # multi-class
                 in_class_pred = logits.argmax(dim=1)
@@ -409,17 +235,14 @@ def main(cfg : DictConfig) -> None:
             print(f"converting {i} from : {i2h[l.item()]} to: {i2h[int(tgt_classes[j].item())]}")
         
         init_image = image.clone() #image.repeat(n_samples_per_class, 1, 1, 1).to(device)
-        sampler.init_images = init_image.to(device)
-        sampler.init_labels = label # n_samples_per_class * [label]
-        if isinstance(cfg.sampler.lp_custom, str) and "dino_" in cfg.sampler.lp_custom:
-            if device != next(sampler.distance_criterion.dino.parameters()).device:
-                sampler.distance_criterion.dino = sampler.distance_criterion.dino.to(device)
-            sampler.dino_init_features = sampler.get_dino_features(sampler.init_images, device=device).clone()
-        #mapped_image = _unmap_img(init_image)
-        init_latent = model.get_first_stage_encoding(
-            model.encode_first_stage(_unmap_img(init_image)))  # move to latent space
+
+
+        # init_latent = model.get_first_stage_encoding(
+            # model.encode_first_stage(_unmap_img(init_image)))  # move to latent space
+
+        text_conditional = True
         
-        if "txt" == model.cond_stage_key: # text-conditional
+        if text_conditional: # text-conditional
             if "ImageNet" in cfg.data._target_:
                 prompts = [f"a photo of a {openai_imagenet_classes[idx.item()]}." for idx in tgt_classes]
             elif "CelebAHQDataset" in cfg.data._target_ or "CelebA" in cfg.data._target_:
@@ -429,7 +252,7 @@ def main(cfg : DictConfig) -> None:
                 prompts = []
                 for target in tgt_classes:
                     if cfg.data.query_label == 31 and target == 0:
-                        attr = "non-smiling"
+                        attr = "frowning"   #"non-smiling"
                     elif cfg.data.query_label == 31 and target == 1:
                         attr = "smiling"
                     elif cfg.data.query_label == 39 and target == 0:
@@ -459,33 +282,35 @@ def main(cfg : DictConfig) -> None:
             prompts = None
 
         print(f'Prompts: {prompts}')
-        
-        out = generate_samples(
-            model, 
-            sampler, 
-            tgt_classes, 
-            ddim_steps, 
-            scale, 
-            init_latent=init_latent.to(device),
-            t_enc=t_enc, 
-            init_image=init_image.to(device), 
-            ccdddim=True, 
-            latent_t_0=cfg.get("latent_t_0", False),
-            prompts=prompts, 
-            seed=seed,
-        )
 
-        all_samples = out["samples"]
-        all_videos = out["videos"] 
-        all_probs = out["probs"]
-        all_masks = out["masks"] 
-        all_cgs = out["cgs"]
+        inference_steps = int(cfg.strength * cfg.ddim_steps)
+
+        # init_image = init_image.resize((512, 512))
+
+        out = pipe(prompt=prompts,
+                image=init_image,
+                num_inference_steps=inference_steps,
+                strength=cfg.strength,
+                guidance_scale=cfg.scale,
+                classifier=classifier_model,
+                tgt=tgt_classes,
+                classifier_lambda=cfg.sampler.classifier_lambda,
+                deg_cone_projection=cfg.sampler.deg_cone_projection,
+                lp_custom=cfg.sampler.lp_custom,
+                dist_lambda=cfg.sampler.dist_lambda)
+        gen_images = out.images
+        # image = pipe(prompt=prompt, image=original_image, strength=0.3).images[0]
+
+        all_samples = out.images
+        all_probs = None    # out.probs
 
         with torch.inference_mode():
             if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
                 logits = classifier_model(all_samples[0])
             else:
-                logits = sampler.get_classifier_logits(_unmap_img(all_samples[0])) #converting to -1, 1 (it is converted back in the function)
+                # logits = sampler.get_classifier_logits(_unmap_img(all_samples[0])) #converting to -1, 1 (it is converted back in the function)
+                print(f'Img min {torch.min(image)} max {torch.max(image)}')
+                logits = classifier_model(image)
             if "ImageNet" in cfg.data._target_ or "CUB" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_: # multi-class
                 out_class_pred = logits.argmax(dim=1)
                 out_confid = logits.softmax(dim=1).max(dim=1).values
@@ -500,8 +325,10 @@ def main(cfg : DictConfig) -> None:
         # Loop through your data and update the table incrementally
         for j in range(batch_size):
             # Generate data for the current row
-            src_image = copy.deepcopy(sampler.init_images[j].cpu()) #all_samples[j][0])
-            gen_image = copy.deepcopy(all_samples[0][j].cpu())
+            src_image = copy.deepcopy(init_image[j].cpu())
+            # src_image = copy.deepcopy(sampler.init_images[j].cpu()) #all_samples[j][0])
+            # gen_image = copy.deepcopy(all_samples[0][j].cpu())
+            gen_image = copy.deepcopy(all_samples[j])
             class_prediction = copy.deepcopy(all_probs[0][j]) if all_probs is not None else out_confid[j] # all_probs[j]
             
             source = i2h[label[j].item()]
@@ -510,9 +337,9 @@ def main(cfg : DictConfig) -> None:
             out_pred_cls = i2h[out_class_pred[j].item()]
 
             #diff =  (init_image - all_samples[j][1:])
-            diff = sampler.init_images[j]-all_samples[0][j]   
-            lp1 = int(torch.norm(diff, p=1, dim=-1).mean().cpu().numpy())
-            lp2 = int(torch.norm(diff, p=2, dim=-1).mean().cpu().numpy())
+            # diff = init_image[j]-all_samples[0][j]   
+            # lp1 = int(torch.norm(diff, p=1, dim=-1).mean().cpu().numpy())
+            # lp2 = int(torch.norm(diff, p=2, dim=-1).mean().cpu().numpy())
             #print(f"lp1: {lp1}, lp2: {lp2}")
 
             data_dict = {
@@ -528,20 +355,9 @@ def main(cfg : DictConfig) -> None:
                 "out_tgt_confid": out_confid_tgt[j].cpu().item(), 
                 "in_confid": in_confid[j].cpu().item(), 
                 "in_tgt_confid": in_confid_tgt[j].cpu().item(), 
-                "closness_1": lp1, 
-                "closness_2": lp2,
+                # "closness_1": lp1, 
+                # "closness_2": lp2,
             }
-            # if cfg.record_intermediate_results:
-            #     if all_videos is not None:
-            #         video_results = {
-            #             "video": (255. * all_videos[0][j]).to(torch.uint8).cpu(), 
-            #         }
-            #         data_dict = dict(data_dict, **video_results)
-            #     if all_cgs is not None:
-            #         cgs_results = {
-            #             "cgs": (255.*all_cgs[0][j]).to(torch.float32).cpu(),
-            #         }
-            #         data_dict = dict(data_dict, **cgs_results)
 
             if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
                 uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
@@ -561,7 +377,8 @@ def main(cfg : DictConfig) -> None:
             os.chmod(orig_save_path, 0o555)
 
             cf_save_path = os.path.join(out_dir, 'counterfactual', f'{str(uidx).zfill(5)}.png')
-            save_image(gen_image.clip(0, 1), cf_save_path)
+            # save_image(gen_image.clip(0, 1), cf_save_path)
+            gen_image.save(cf_save_path)
             os.chmod(cf_save_path, 0o555)
 
         if (i + 1) % cfg.log_rate == 0:
@@ -577,5 +394,6 @@ def main(cfg : DictConfig) -> None:
             
     return None
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()

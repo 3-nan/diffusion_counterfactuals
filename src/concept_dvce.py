@@ -558,10 +558,10 @@ class ConceptDiffusionAttack:
                                 mask_composite = zennit.composites.NameMapComposite(name_map)
 
                                 with mask_composite.context(self.classifier) as modified:
-                                #     x = _map_img(pred_x0)
-                                #     if not self.classifier_wrapper: # only works for ImageNet!
-                                #         x = tf.center_crop(x, 224)
-                                #         x = normalize(x)
+                                    #     x = _map_img(pred_x0)
+                                    #     if not self.classifier_wrapper: # only works for ImageNet!
+                                    #         x = tf.center_crop(x, 224)
+                                    #         x = normalize(x)
 
                                     logits2 = modified(x_aug)
 

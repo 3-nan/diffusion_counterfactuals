@@ -64,7 +64,9 @@ COPY test_stuff.py ./test_stuff.py
 # CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
 
 # CMD ["python", "run_concept_ldce.py", "--config-name=v1_pets"]
-CMD ["python", "run_concept_ldce.py", "--config-name=v1_flowers"]
+# CMD ["python", "run_concept_ldce.py", "--config-name=v1_flowers"]
+
+CMD ["python", "run_ldce_baseline.py", "--config-name=v1_celeba"]
 
 # CMD ["python", "src/evaluation/compute_fid.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline"]
 # CMD ["python", "src/evaluation/compare_concept_activations.py", "--config-name=v1_concept"]
