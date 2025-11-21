@@ -49,6 +49,7 @@ def main(cfg : DictConfig) -> None:
             cfg.verbose = True
     if "record_intermediate_results" not in cfg:
         with open_dict(cfg):
+            
             cfg.record_intermediate_results = True
 
     if "verbose" in cfg and not cfg.verbose:
@@ -376,10 +377,10 @@ def main(cfg : DictConfig) -> None:
                 "out_tgt_confid": out_confid_tgt[j].cpu().item(), 
                 "in_confid": in_confid[j].cpu().item(), 
                 "in_tgt_confid": in_confid_tgt[j].cpu().item(), 
-                "closness_1": lp1, 
-                "closness_2": lp2,
-                "conditions": concept_conds[cfg.concept_layer][j],
-                "concept_diff": concept_diff[j],
+                # "closness_1": lp1, 
+                # "closness_2": lp2,
+                # "conditions": concept_conds[cfg.concept_layer][j],
+                # "concept_diff": concept_diff[j],
             }
             if cfg.record_intermediate:
                 if all_videos is not None:
@@ -399,9 +400,9 @@ def main(cfg : DictConfig) -> None:
                 uidx = unique_data_idx[j].item()
 
             # # Save data dict
-            # dict_save_path = os.path.join(out_dir, f'{str(uidx).zfill(5)}.pth')
-            # torch.save(data_dict, dict_save_path)
-            # os.chmod(dict_save_path, 0o555)
+            dict_save_path = os.path.join(out_dir, f'{str(uidx).zfill(5)}.pth')
+            torch.save(data_dict, dict_save_path)
+            os.chmod(dict_save_path, 0o555)
 
             pathlib.Path(os.path.join(out_dir, 'original')).mkdir(parents=True, exist_ok=True, mode=0o777)
             os.chmod(os.path.join(out_dir, 'original'), 0o777)

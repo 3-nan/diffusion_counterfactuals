@@ -4,6 +4,8 @@ from typing import Callable, Dict, List, Optional, Union
 import PIL
 import torch
 from torchvision.transforms.functional import resize
+from zennit.composites import NameMapComposite
+# from zennit.core import Hook, RemovableHandle, RemovableHandleList
 from diffusers import Kandinsky3Img2ImgPipeline
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.image_processor import PipelineImageInput
@@ -12,6 +14,7 @@ from diffusers.utils import deprecate, replace_example_docstring
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import retrieve_timesteps, EXAMPLE_DOC_STRING
 
 from ldce.sampling_helpers import cone_project, cone_project_chuncked, cone_project_chuncked_zero, _renormalize_gradient
+from src.concept_cc_ddim import MaskHook, spatial_map, batch_map, _register_mask_fn
 
 class ModifiedKandinskyImg2ImgPipeline(Kandinsky3Img2ImgPipeline):
 
@@ -43,6 +46,11 @@ class ModifiedKandinskyImg2ImgPipeline(Kandinsky3Img2ImgPipeline):
         deg_cone_projection=45,
         lp_custom = 1,
         dist_lambda = 0.7,
+        concept_conditioning=True,
+        concept_conditions = None,
+        spatial=False,
+        uncondition_end=True,
+        clf_transform=None,
         **kwargs,
     ):
         """
@@ -224,15 +232,17 @@ class ModifiedKandinskyImg2ImgPipeline(Kandinsky3Img2ImgPipeline):
                     if self.do_classifier_free_guidance:
                         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
 
-                        pred_x0_latent = self.compute_pred_x0(x_noise, t, noise_pred_uncond)
+                        # pred_x0_latent = self.compute_pred_x0(x_noise, t, noise_pred_uncond)
 
-                    latents = self.scheduler.step(noise_pred_uncond, t, latents, **kwargs, return_dict=False)[0]
-                    # pred_x0 = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
-                    # # pred_x0 = self.vae.decode(x_noise / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
+                        latentsstep = self.scheduler.step(noise_pred_uncond, t, latents, **kwargs, return_dict=True)   #[0]
+                        latents = latentsstep.prev_sample
+                        pred_x0_latent = latentsstep.pred_original_sample
+                        # pred_x0 = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
+                        # # pred_x0 = self.vae.decode(x_noise / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
 
-                    # pred_x0 = self.image_processor.postprocess(pred_x0, output_type='pt', do_denormalize=[True] * pred_x0.shape[0])
+                        # pred_x0 = self.image_processor.postprocess(pred_x0, output_type='pt', do_denormalize=[True] * pred_x0.shape[0])
 
-                    pred_x0 = self.movq.decode(latents, force_not_quantize=True)["sample"]
+                        pred_x0 = self.movq.decode(pred_x0_latent, force_not_quantize=True)["sample"]
 
                     # noise_pred = (guidance_scale + 1.0) * noise_pred_text - guidance_scale * noise_pred_uncond
 
@@ -242,18 +252,52 @@ class ModifiedKandinskyImg2ImgPipeline(Kandinsky3Img2ImgPipeline):
                     distance_criterion = torch.nn.L1Loss(reduction='sum')
 
                     if lp_custom:          # changed from elif
-                        rpred_x0 = resize(pred_x0, (256, 256)).to(torch.float32)
                         with torch.enable_grad():
-                            pred_x0_0to1 = torch.clamp(rpred_x0, min=0.0, max=1.0)
+                            pred_x0_0to1 = resize(pred_x0, (256, 256)).to(torch.float32)
+                            # with torch.enable_grad():
+                            # rpred_x0 = rpred_x0 * 0.5 + 0.5
+                            # print(f'rpred_x0 min {torch.min(rpred_x0)}')
+                            # print(f'rpred_x0 max {torch.max(rpred_x0)}')
+                            # print(f'orig image min {torch.min(image)}')
+                            # print(f'orig image max {torch.max(image)}')
+                            # pred_x0_0to1 = torch.clamp(rpred_x0, min=0.0, max=1.0)
 
                             lp_dist = distance_criterion(pred_x0_0to1, image.to(x_noise.device))
                             lp_grad = torch.autograd.grad(lp_dist.mean(), x_noise, retain_graph=True)[0]
 
+                # with torch.enable_grad():
                     rpred_x0 = resize(pred_x0, (224, 224)).to(torch.float32)
+                    rpred_x0 = rpred_x0 * 0.5 + 0.5
 
-                    pred_logits = classifier(rpred_x0)
+                    if concept_conditioning:
+                        hook_map, y_targets = {}, []
+
+                        # print(f'timestep: {t.item()}')
+                    # # Free up last 50 generation steps
+                        if not uncondition_end or t.item() >= 50:                               # TEST THIS FIRST
+                            for key in concept_conditions.keys():
+                                if key not in hook_map:
+                                    hook_map[key] = MaskHook([])
+
+                                if spatial:
+                                    _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
+                                else:
+                                    _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
+
+                        name_map = [([name], hook) for name, hook in hook_map.items()]
+                        mask_composite = NameMapComposite(name_map)
+
+                        with mask_composite.context(classifier) as modified:
+                            # x = _map_img(pred_x0)
+                            # if not self.classifier_wrapper: # only works for ImageNet!
+                            #     x = tf.center_crop(x, 224)
+                            #     x = normalize(x)
+
+                            pred_logits = modified(clf_transform(rpred_x0))
+
+                    else:
+                        pred_logits = classifier(clf_transform(rpred_x0))
                     # pred_logits = self.get_classifier_logits(pred_x0)
-                    # print(pred_logits)
 
                     y=tgt.to(device)
 
@@ -278,7 +322,7 @@ class ModifiedKandinskyImg2ImgPipeline(Kandinsky3Img2ImgPipeline):
 
                 use_original_steps = True
                 cone_projection_type = "zero_binning"
-                enforce_same_norms = True # False
+                enforce_same_norms = True #True # False
 
                 if lp_custom or classifier_lambda != 0:
                     b = x_noise.shape[0]
@@ -334,7 +378,8 @@ class ModifiedKandinskyImg2ImgPipeline(Kandinsky3Img2ImgPipeline):
 
                     score_out -= lp_score
 
-                noise_pred = guidance_scale * score_out + noise_pred_text
+                # noise_pred = guidance_scale * score_out + noise_pred_text
+                noise_pred = noise_pred_uncond + guidance_scale * score_out
                 # noise_pred = guidance_scale * (noise_pred_text - noise_pred_uncond) + noise_pred_text
 
                 # compute the previous noisy sample x_t -> x_t-1
@@ -372,9 +417,9 @@ class ModifiedKandinskyImg2ImgPipeline(Kandinsky3Img2ImgPipeline):
                 image = self.movq.decode(latents, force_not_quantize=True)["sample"]
 
                 if output_type in ["np", "pil"]:
-                    print(f'image min {torch.min(image)}')
-                    print(f'image max {torch.max(image)}')
-                    # image = image * 0.5 + 0.5
+                    image = image * 0.5 + 0.5
+                    # print(f'image min {torch.min(image)}')
+                    # print(f'image max {torch.max(image)}')
                     image = image.clamp(0, 1)
                     image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 

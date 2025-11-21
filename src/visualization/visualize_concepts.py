@@ -27,7 +27,9 @@ from ldce.data.imagenet_classnames import name_map, openai_imagenet_classes
 
 from src.sampling_helpers import disabled_train
 from src.concept_conditioning import compute_concept_conditioning
-from src.helpers.data_model_helpers import get_classifier
+# from src.helpers.data_model_helpers import get_classifier
+from run_ldce_baseline import get_classifier
+from run_ldce_baseline import get_dataset
 from src.helpers.concept_visualization import plot_grid
 
 def set_seed(seed: int = 0):
@@ -36,48 +38,48 @@ def set_seed(seed: int = 0):
     random.seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-def get_dataset(cfg, last_data_idx: int = 0):
-    if "ImageNet" in cfg.data._target_:
-        out_size = 256
-        transform_list = [
-            T.Resize((out_size, out_size)),
-            T.ToTensor()
-        ]
-        transform = T.Compose(transform_list)
-        dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
-    elif "Flowers102" in cfg.data._target_:
-        transform = T.Compose([
-            T.Resize((256, 256)),
-            T.ToTensor(),
-        ])
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
-        def _convert_to_rgb(image):
-            return image.convert('RGB')
-        out_size = 256
-        transform_list = [
-            T.Resize((out_size, out_size)),
-            # transforms.CenterCrop(out_size),
-            _convert_to_rgb,
-            T.ToTensor(),
-        ]
-        transform = T.Compose(transform_list)
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    else:
-        raise NotImplementedError
-    return dataset
+# def get_dataset(cfg, last_data_idx: int = 0):
+#     if "ImageNet" in cfg.data._target_:
+#         out_size = 256
+#         transform_list = [
+#             T.Resize((out_size, out_size)),
+#             T.ToTensor()
+#         ]
+#         transform = T.Compose(transform_list)
+#         dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
+#     elif "Flowers102" in cfg.data._target_:
+#         transform = T.Compose([
+#             T.Resize((256, 256)),
+#             T.ToTensor(),
+#         ])
+#         dataset = instantiate(
+#             cfg.data, 
+#             shard=cfg.data.shard, 
+#             num_shards=cfg.data.num_shards, 
+#             transform=transform, 
+#             restart_idx=last_data_idx
+#         )
+#     elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
+#         def _convert_to_rgb(image):
+#             return image.convert('RGB')
+#         out_size = 256
+#         transform_list = [
+#             T.Resize((out_size, out_size)),
+#             # transforms.CenterCrop(out_size),
+#             _convert_to_rgb,
+#             T.ToTensor(),
+#         ]
+#         transform = T.Compose(transform_list)
+#         dataset = instantiate(
+#             cfg.data, 
+#             shard=cfg.data.shard, 
+#             num_shards=cfg.data.num_shards, 
+#             transform=transform, 
+#             restart_idx=last_data_idx
+#         )
+#     else:
+#         raise NotImplementedError
+#     return dataset
 
 # def plot_concepts():
 
@@ -94,6 +96,8 @@ def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx,
             fv_path = f'/results/counterfactuals/fv_flowers_{cfg.classifier_model.name}'
         elif "Pets" in cfg.data._target_:
             fv_path = f'/results/counterfactuals/fv_pets_{cfg.classifier_model.name}'
+        elif "CUB" in cfg.data._target_:
+            fv_path = f'/results/counterfactuals/fv_cub_{cfg.classifier_model.name}'
 
     print(fv_path)
 
@@ -141,6 +145,8 @@ def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx,
         plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'flowers_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
     elif "Pets" in cfg.data._target_:
         plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'pets_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
+    elif "CUB" in cfg.data._target_:
+        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'cub_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
     plt.close()
 
 
@@ -283,6 +289,8 @@ def main(cfg : DictConfig) -> None:
         with open("data/pets_idx_to_label.json", "r") as f:
             pets_idx_to_classname = json.load(f)
         i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
+    elif "CUB" in cfg.data._target_:
+        i2h = {int(k): v for k, v in enumerate(dataset.dataset.get_class_names())}
     else:
         raise NotImplementedError
 
@@ -343,7 +351,7 @@ def main(cfg : DictConfig) -> None:
 
         for j in range(batch_size):
             # Read conditions from file
-            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
+            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_:
                 uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
             else:
                 uidx = unique_data_idx[j].item()

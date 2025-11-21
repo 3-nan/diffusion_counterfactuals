@@ -21,9 +21,14 @@ class CFDataset():
 
         self.images = []
         self.path = path
-        for bucket_folder in sorted(glob.glob(self.path + "/bucket*")):
-            for original, counterfactual in zip(sorted(glob.glob(bucket_folder + "/original/*.png")), sorted(glob.glob(bucket_folder + "/counterfactual/*.png"))):
-                self.images.append((original, counterfactual, os.path.join(bucket_folder, os.path.basename(original).replace("png", "pth"))))
+
+        if "dvce" in path:
+            for original, counterfactual in zip(sorted(glob.glob(self.path + "/original/*.png")), sorted(glob.glob(self.path + "/counterfactual/*.png"))):
+                self.images.append((original, counterfactual, os.path.join(self.path, os.path.basename(original).replace("png", "pth"))))
+        else:
+            for bucket_folder in sorted(glob.glob(self.path + "/bucket*")):
+                for original, counterfactual in zip(sorted(glob.glob(bucket_folder + "/original/*.png")), sorted(glob.glob(bucket_folder + "/counterfactual/*.png"))):
+                    self.images.append((original, counterfactual, os.path.join(bucket_folder, os.path.basename(original).replace("png", "pth"))))
 
         imagenet_mean = (0.485, 0.456, 0.406)
         iamgenet_std = (0.229, 0.224, 0.225)
@@ -70,18 +75,23 @@ def compute_validity_metrics(args):
 
     n_samples, correct = 0, 0
     confidence = []
-    for pth_file in tqdm(sorted(glob.glob(args.output_path + "/bucket*/*.pth")), leave=False):
-        data = torch.load(pth_file, map_location="cpu")
-        # print(data.keys())
-        # print(data["target_confidence"])
-        # print(data["target"])
-        # print(data["out_pred"])
-        # print(data["out_confid"])
-        # raise ValueError
-        if "target" in data and "out_pred" in data:
-            correct += (data["target"] == data["out_pred"])
-            n_samples += 1
-            confidence.append(data["out_confid"])
+
+    if "dvce" in args.output_path:
+        for pth_file in tqdm(sorted(glob.glob(args.output_path + "/*.pth")), leave=False):
+            data = torch.load(pth_file, map_location="cpu")
+
+            if "target" in data and "out_pred" in data:
+                correct += (data["target"] == data["out_pred"])
+                n_samples += 1
+                confidence.append(data["out_confid"])
+    else:
+        for pth_file in tqdm(sorted(glob.glob(args.output_path + "/bucket*/*.pth")), leave=False):
+            data = torch.load(pth_file, map_location="cpu")
+
+            if "target" in data and "out_pred" in data:
+                correct += (data["target"] == data["out_pred"])
+                n_samples += 1
+                confidence.append(data["out_confid"])
         # if "target" in data and "out_probability" in data:
         #     correct += (data["target"]==torch.argmax(data["out_probability"])).int().item()
         #     n_samples += 1

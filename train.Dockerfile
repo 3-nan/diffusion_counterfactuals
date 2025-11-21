@@ -10,9 +10,11 @@ RUN apt-get -y install cmake
 # RUN apt install build-essential -y
 RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
 
-RUN pip3 install numpy==1.24.1 opencv-python timm cub-tools --no-cache-dir
+RUN pip3 install numpy==1.24.1 opencv-python timm cub-tools tensorboard --no-cache-dir
 
 COPY src/ ./src
 
 # CMD ["python", "src/training/fine_tune_cubs.py", "--config-name=v1_cubs"]
-CMD ["python", "src/training/fine_tune_adience.py"]
+# CMD ["python", "src/training/fine_tune_adience.py"]
+# CMD ["python", "src/training/fine_tune_celeba.py"]
+CMD ["python", "src/training/fine_tune_pets.py"]

@@ -17,32 +17,62 @@ def compute_fid(args):
         counterfactual_images_path = os.path.join(args.output_path, "all_counterfactuals")
         os.makedirs(counterfactual_images_path, mode=777, exist_ok=True)
         os.chmod(counterfactual_images_path, 0o777)
-        
-        # create symbolic links
-        counter = 0
-        for bucket_folder in sorted(glob.glob(args.output_path+ "/bucket*")):
-            for original_path, counterfactual_path in zip(sorted(glob.glob(bucket_folder + "/original/*")), sorted(glob.glob(bucket_folder + "/counterfactual/*"))):
+
+        if 'dvce' in args.output_path:
+            counter = 0
+            # for bucket_folder in sorted(glob.glob(args.output_path+ "/bucket*")):
+            for original_path, counterfactual_path in zip(sorted(glob.glob(args.output_path+"/original/*")), sorted(glob.glob(args.output_path+"/counterfactual/*"))):
                 #check if file already exists
                 if not os.path.exists(os.path.join(real_images_path, f"{counter}.png")):
                     os.symlink(original_path, os.path.join(real_images_path, f"{counter}.png"))
                 if not os.path.exists(os.path.join(counterfactual_images_path, f"{counter}.png")):
                     os.symlink(counterfactual_path, os.path.join(counterfactual_images_path, f"{counter}.png"))
                 counter += 1
+            import pathlib
+            IMAGE_EXTENSIONS = {'bmp', 'jpg', 'jpeg', 'pgm', 'png', 'ppm',
+                                'tif', 'tiff', 'webp'}
+            path = pathlib.Path(real_images_path)
+            files = sorted([file for ext in IMAGE_EXTENSIONS
+                            for file in path.glob('*.{}'.format(ext))])
 
-        import pathlib
-        IMAGE_EXTENSIONS = {'bmp', 'jpg', 'jpeg', 'pgm', 'png', 'ppm',
-                            'tif', 'tiff', 'webp'}
-        path = pathlib.Path(real_images_path)
-        files = sorted([file for ext in IMAGE_EXTENSIONS
-                        for file in path.glob('*.{}'.format(ext))])
+            cmd = ["python", "-m", "pytorch_fid", f"{real_images_path}/", f"{counterfactual_images_path}/", "--device", "cuda"]
+            output = subprocess.check_output(cmd, universal_newlines=True)
+            #convert output to float
+            fid = float(output.split()[-1])
+            shutil.rmtree(real_images_path)
+            shutil.rmtree(counterfactual_images_path)
+            return fid
+            
+        else:
+            print("dvce not in path")
+            # create symbolic links
+            counter = 0
+            assert os.path.isdir(args.output_path)
+            for bucket_folder in sorted(glob.glob(args.output_path+ "/bucket*")):
+                print(bucket_folder)
+                for original_path, counterfactual_path in zip(sorted(glob.glob(bucket_folder + "/original/*")), sorted(glob.glob(bucket_folder + "/counterfactual/*"))):
+                    #check if file already exists
+                    if not os.path.exists(os.path.join(real_images_path, f"{counter}.png")):
+                        os.symlink(original_path, os.path.join(real_images_path, f"{counter}.png"))
+                    if not os.path.exists(os.path.join(counterfactual_images_path, f"{counter}.png")):
+                        os.symlink(counterfactual_path, os.path.join(counterfactual_images_path, f"{counter}.png"))
+                    counter += 1
 
-        cmd = ["python", "-m", "pytorch_fid", f"{real_images_path}/", f"{counterfactual_images_path}/", "--device", "cuda"]
-        output = subprocess.check_output(cmd, universal_newlines=True)
-        #convert output to float
-        fid = float(output.split()[-1])
-        shutil.rmtree(real_images_path)
-        shutil.rmtree(counterfactual_images_path)
-        return fid
+            import pathlib
+            IMAGE_EXTENSIONS = {'bmp', 'jpg', 'jpeg', 'pgm', 'png', 'ppm',
+                                'tif', 'tiff', 'webp'}
+            path = pathlib.Path(real_images_path)
+            files = sorted([file for ext in IMAGE_EXTENSIONS
+                            for file in path.glob('*.{}'.format(ext))])
+
+            print(counter)
+            cmd = ["python", "-m", "pytorch_fid", f"{real_images_path}/", f"{counterfactual_images_path}/", "--device", "cuda"]
+            output = subprocess.check_output(cmd, universal_newlines=True)
+            #convert output to float
+            fid = float(output.split()[-1])
+            shutil.rmtree(real_images_path)
+            shutil.rmtree(counterfactual_images_path)
+            return fid
     elif args.sfid: # sFID computation
         sfids = []
         def checkNatNum(n):

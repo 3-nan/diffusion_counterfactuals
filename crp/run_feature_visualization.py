@@ -2,6 +2,7 @@ import sys
 sys.path.append("./")
 sys.path.append("./ldce")
 sys.path.append("./data")
+import timm
 import torch
 import torchvision
 from torchvision.models.resnet import resnet18, resnet50
@@ -9,6 +10,7 @@ from torchvision.models.vgg import vgg16_bn, vgg16
 from torchvision.models import vit_b_16
 import torchvision.transforms as T
 from PIL import Image
+import zennit
 from zennit.canonizers import SequentialMergeBatchNorm
 from zennit.composites import EpsilonPlusFlat
 from zennit.torchvision import ResNetCanonizer
@@ -59,6 +61,23 @@ def get_dataset(cfg, last_data_idx: int = 0):
             transform=transform, 
             restart_idx=last_data_idx
         )
+    elif "CUB" in cfg.data._target_:
+        out_size = cfg.data.image_size
+        transform_list = [
+            T.Resize((out_size, out_size)),
+            # transforms.CenterCrop(out_size),
+            # _convert_to_rgb,
+            T.ToTensor(),
+        ]
+        transform = T.Compose(transform_list)
+        print(cfg.data)
+        dataset = instantiate(
+            cfg.data,
+            shard=cfg.data.shard,
+            num_shards=cfg.data.num_shards, 
+            transform=transform, 
+            restart_idx=last_data_idx
+        )
     else:
         raise NotImplementedError
     return dataset
@@ -66,24 +85,29 @@ def get_dataset(cfg, last_data_idx: int = 0):
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # data_name = "imagenet"
-data_name = "flowers"
+# data_name = "flowers"
+data_name = "cub"
 # data_name = "pets"
 
-model_name = "vgg16_bn"
+model_name = "vit_base_patch16_224"
+# model_name = "vgg16_bn"
 # model_name = "resnet18"
 
-if model_name == "vgg16":
-    model = vgg16(True).to(device)
-elif model_name == "vgg16_bn":
-    model = vgg16_bn(True).to(device)
-elif model_name == "resnet18":
-    model = resnet18(True).to(device)
-elif model_name == "resnet50":
-    model = resnet50(True).to(device)
-elif model_name == "vit_b_16":
-    model = vit_b_16(True).to(device)
+if data_name == "cub":
+    model = timm.create_model(model_name, pretrained=False, num_classes=200)
 else:
-    raise ValueError(f'model_name {model_name} not in list, please verify!')
+    if model_name == "vgg16":
+        model = vgg16(True).to(device)
+    elif model_name == "vgg16_bn":
+        model = vgg16_bn(True).to(device)
+    elif model_name == "resnet18":
+        model = resnet18(True).to(device)
+    elif model_name == "resnet50":
+        model = resnet50(True).to(device)
+    elif model_name == "vit_b_16":
+        model = vit_b_16(True).to(device)
+    else:
+        raise ValueError(f'model_name {model_name} not in list, please verify!')
 
 if data_name == "flowers":
     weights_path = "/results/models/vgg16bn_flowers_20240503_122623_78_0.870"
@@ -99,6 +123,11 @@ elif data_name == "pets":
     model.load_state_dict(torch.load(weights_path))
     model.to(device)
 
+elif data_name == "cub":
+    weights_path = f"/results/models/{model_name}/caltech_birds_{model_name}_dict.pth"
+    model.load_state_dict(torch.load(weights_path))
+    model.to(device)
+
 model.eval()
 
 if model_name.startswith('vgg'):
@@ -107,6 +136,14 @@ if model_name.startswith('vgg'):
 elif model_name.startswith('resnet'):
     canonizers = [ResNetCanonizer()]
     composite = EpsilonPlusFlat(canonizers)
+elif model_name.startswith('vit'):
+    layer_map = [
+    (zennit.types.Activation, zennit.rules.Pass()),  # ignore activations
+    (zennit.types.AvgPool, zennit.rules.Norm()),  # normalize relevance for any AvgPool
+    (zennit.types.Convolution, zennit.rules.Epsilon(epsilon=1e-6)),  # any convolutional layer
+    (zennit.types.Linear, zennit.rules.Epsilon(epsilon=1e-6))  # this is the dense Linear, not any
+]
+    composite = zennit.composites.LayerMapComposite(layer_map=layer_map)
 else:
     raise ValueError('please specify canonizers and composite')
 
@@ -175,11 +212,29 @@ elif data_name == "flowers":
 #   'batch_size': 4
     }
     fv_path = f"/results/counterfactuals/fv_flowers_{model_name}"
+elif data_name == "cub":
+    cfg_dict = {
+        'data': {
+            '_target_': 'data.datasets.CUB',
+            'root': "/Data/CUB_200_2011",
+            'return_tgt_cls': False,
+            'return_index': False,
+            'shard': 0,
+            'num_shards': 7,
+            'image_size': 224, #256,
+        }
+#   'batch_size': 4
+    }
+    fv_path = f"/results/counterfactuals/fv_cub_{model_name}"
 
 cfg = OmegaConf.create(cfg_dict)
 dataset = get_dataset(cfg)
 
+print(len(dataset))
+print(dataset.get_class_names())
+print(len(dataset.get_class_names()))
+
 fv = FeatureVisualization(attribution, dataset, layer_map, preprocess_fn=preprocessing, path=fv_path)
 
 # it will take approximately 20 min on a Titan RTX
-saved_files = fv.run(composite, 0, len(dataset), 32, 100)
+saved_files = fv.run(composite, 0, len(dataset), batch_size=32) #, 100)

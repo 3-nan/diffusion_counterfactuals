@@ -1,5 +1,5 @@
 # From pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
-From pytorch/pytorch:1.11.0-cuda11.3-cudnn8-runtime
+FROM pytorch/pytorch:1.11.0-cuda11.3-cudnn8-runtime
 
 RUN apt-get update
 
@@ -59,20 +59,32 @@ COPY run_concept_ldce.py ./run_concept_ldce.py
 COPY run_feature_optim.py ./run_feature_optim.py
 COPY run_evaluation.py ./run_evaluation.py
 COPY test_stuff.py ./test_stuff.py
+COPY read_results_file.py ./read_results_file.py
 
 # CMD ["python", "run_ldce_baseline.py", "--config-name=v1_original"]
 # CMD ["python", "run_concept_ldce.py", "--config-name=v1_concept"]
 
 # CMD ["python", "run_concept_ldce.py", "--config-name=v1_pets"]
 # CMD ["python", "run_concept_ldce.py", "--config-name=v1_flowers"]
+# CMD ["python", "run_concept_ldce.py", "--config-name=v1_celeba"]
+CMD ["python", "run_concept_ldce.py", "--config-name=v1_cub"]
 
-CMD ["python", "run_ldce_baseline.py", "--config-name=v1_celeba"]
+# CMD ["python", "src/training/fine_tune_pets.py"]
+# CMD ["python", "src/training/fine_tune_flowers.py"]
+# CMD ["python", "src/training/fine_tune_celeba.py"]
+
+# CMD ["python", "run_ldce_baseline.py", "--config-name=v1_flowers"]
+# CMD ["python", "run_ldce_baseline.py", "--config-name=v1_pets"]
+# CMD ["python", "run_ldce_baseline.py", "--config-name=v1_celeba"]
+# CMD ["python", "run_ldce_baseline.py", "--config-name=v1_cub"]
 
 # CMD ["python", "src/evaluation/compute_fid.py", "--output-path=/results/counterfactuals/imagenet_resnet_baseline"]
 # CMD ["python", "src/evaluation/compare_concept_activations.py", "--config-name=v1_concept"]
 # CMD ["python", "src/evaluation/obtain_wrong_predictions.py", "--config-name=v1_vgg_concept"]
-# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_40_concept_100_spatial_optim"]
+# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_40_concept_20_optim"]
+# CMD ["python", "run_evaluation.py", "--output-path=/results/dvce/imagenet_vgg16bn_37_concept_20_optim"]
 
+# CMD ["python", "read_results_file.py", "--output-path=/results/counterfactuals/imagenet_vgg16bn_40_concept_20_optim"]
 # CMD ["python", "src/clustering/compute_clustering.py", "--config-name=v1_cluster"]
 # CMD ["python", "src/concept_analysis.py", "--config-name=v1_concept"]
 # CMD ["python", "src/visualization/show_gradient_alignment.py"]

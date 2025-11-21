@@ -31,7 +31,13 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
 
     assert layer
 
-    target_tensor = torch.eye(num_classes, device=image.device)[target]
+    single_label = False
+
+    if single_label:
+        target = target.type(torch.int64)
+        target_tensor = torch.eye(num_classes, device=image.device)[target, 0]
+    else:
+        target_tensor = torch.eye(num_classes, device=image.device)[target]
     # target_tensor = target_tensor.to(image.device)
 
     # Get gradient in specified layer
@@ -50,9 +56,9 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
 
     # print the gradient tensors for demonstration
     grad = layer.output.grad.detach()
-    print(f'Layer output grad size: {grad.size()} in layer {layer_name} {type(layer)}')
+    # print(f'Layer output grad size: {grad.size()} in layer {layer_name} {type(layer)}')
 
-    print(type(model))
+    # print(type(model))
 
     # Extract most important channels based on the selected cond_option
     if cond_option == "sumabs":
@@ -133,14 +139,14 @@ def compute_concept_conditioning(model, image, target, layer_name, num_concepts=
 
                 spatial_cond_mask[s, cond, :, :] = (grad[s, cond, :, :].abs() >= th)
         
-        print(f'Spatial cond mask size: {spatial_cond_mask.size()}')
+        # print(f'Spatial cond mask size: {spatial_cond_mask.size()}')
         if return_gradient:
             return {layer_name: spatial_cond_mask}, {layer_name: conditions}, diff, grad.cpu().numpy()
         else:
             return {layer_name: spatial_cond_mask}, {layer_name: conditions}, diff
 
-    print(conditions)
-    print(f'Condition shape: {conditions.shape}')
+    # print(conditions)
+    # print(f'Condition shape: {conditions.shape}')
     if return_gradient:
         return {layer_name: spatial_cond_mask}, {layer_name: conditions}, diff, grad.cpu().numpy()
     else:

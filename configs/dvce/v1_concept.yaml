@@ -1,7 +1,7 @@
 resume: False    # False True
 fixed_seed: False
 record_intermediate: False
-output_dir: /results/dvce/imagenet_vgg16bn_40_concept_20_optim
+output_dir: /results/dvce/imagenet_vgg16bn_40_concept_100_optim
 
 diffusion_model:
   cfg_path: "configs/latent-diffusion/cin256-v2.yaml"
@@ -15,7 +15,7 @@ counterfactual_target: attribution # actattr attribution activation baseline
 target_norm: False   # False True
 
 concept_layer: features.40    # 29  # features.37 # features.40  layer4.1.conv1  layer3.1.conv1
-num_concepts: 20  # 6
+num_concepts: 100  # 6
 spatial: False     # False True
 optim: False
 cond_option: sumabs     # abssum absmax
@@ -92,6 +92,7 @@ data:
   batch_size: 4
   start_sample: 0
   end_sample: 10
+  image_size: 256
 
 sampler:
   self_recurrence: 0

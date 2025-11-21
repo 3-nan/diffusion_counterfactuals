@@ -1,7 +1,7 @@
 resume: False    # False True
 fixed_seed: False
 record_intermediate: False
-output_dir: /results/counterfactuals/pets_vit_concept_10_scale_5_b8 #mlpfc2 #_spatial_optim
+output_dir: /results/counterfactuals/cub_vgg16bn_concept_80_scale_5 #vit_concept_100_scale_5_b10mlpfc2 #cub_vit_concept_20_scale_5_b10mlpfc2 #concept_50_scale_5_b10mlpfc2 #_spatial_optim
 
 diffusion_model:
   # cfg_path: "configs/latent-diffusion/cin256-v2.yaml"
@@ -11,15 +11,17 @@ diffusion_model:
 
 seg_model:
 classifier_model:
-  name: vit_base_patch16_224 # "vgg16_bn"      # vgg16   vgg16_bn  resnet18  resnet50
+  name: vgg16_bn #vit_base_patch16_224 #vgg16_bn  #vit_base_patch16_224 #vit_base_patch16_224 # "vgg16_bn"      # vgg16   vgg16_bn  resnet18  resnet50
   # classifier_path: "/results/models/vgg16bn_pets_20240503_092321_7_0.92"
-  classifier_path: "/results/models/vit_base_patch16_224_pets_20240923_143234_3_0.92"
+  classifier_path: "/results/models/vgg16_bn/caltech_birds_vgg16_bn_dict.pth"
+  # classifier_path: "/results/models/vit_base_patch16_224/caltech_birds_vit_base_patch16_224_full_0.848.pth"
+  # classifier_path: "/results/models/vit_base_patch16_224/caltech_birds_vit_base_patch16_224_dict.pth"
 
 # counterfactual_target: baseline # actattr attribution activation baseline
 target_norm: False   # False True
 
-concept_layer: blocks.10  #.mlp.fc2 #blocks.10.mlp.fc2 #features.37    # 29  # features.37 # features.40  layer4.1.conv1  layer3.1.conv1
-num_concepts: 10  # 6
+concept_layer: features.37 #blocks.10.mlp.fc2 #features.37 #blocks.10.mlp.fc2 #blocks.10.mlp.fc2 #blocks.10.mlp.fc2 #features.37    # 29  # features.37 # features.40  layer4.1.conv1  layer3.1.conv1
+num_concepts: 80  # 6
 spatial: False     # False True
 cond_option: sumabs     # abssum absmax
 
@@ -31,8 +33,8 @@ ddim_eta: 0.
 log_rate: 1
 
 data:
-  _target_: data.datasets.OxfordIIIPets
-  root: '/Data/PETS'
+  _target_: data.datasets.CUB
+  root: '/Data/CUB_200_2011'
   # idx_to_tgt_cls_path: './ldce/data/image_idx_to_tgt.yaml'
   # split: 'val'
   # return_tgt_cls: True

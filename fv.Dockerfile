@@ -14,7 +14,7 @@ RUN apt install build-essential -y
 COPY requirements.txt ./requirements.txt
 RUN pip3 install -r requirements.txt
 
-RUN pip3 install certifi
+RUN pip3 install certifi timm --no-cache-dir
 COPY ca-certificates /usr/local/share/ca-certificates
 RUN apt-get install --yes --no-install-recommends ca-certificates 
 # software-properties-common ca-certificates
@@ -46,5 +46,6 @@ COPY crp/ ./crp
 # CMD ["python", "crp/run_feature_visualization.py"]
 # CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_concept"]
 # CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_pets"]
-CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_flowers"]
+# CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_flowers"]
+CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_cub"]
 # CMD ["python", "src/visualization/visualize_conditioning.py", "--config-name=v1_concept"]

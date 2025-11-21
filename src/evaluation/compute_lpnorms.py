@@ -13,8 +13,14 @@ class CFDataset():
 
         self.images = []
         self.path = path
-        for bucket_folder in sorted(glob.glob(self.path + "/bucket*")):
-            self.images += [(original, counterfactual) for original, counterfactual in zip(sorted(glob.glob(bucket_folder + "/original/*.png")), sorted(glob.glob(bucket_folder + "/counterfactual/*.png")))]
+
+        if "dvce" in path:
+            # for bucket_folder in sorted(glob.glob(self.path + "/bucket*")):
+            self.images += [(original, counterfactual) for original, counterfactual in zip(sorted(glob.glob(self.path + "/original/*.png")), sorted(glob.glob(self.path + "/counterfactual/*.png")))]
+
+        else:
+            for bucket_folder in sorted(glob.glob(self.path + "/bucket*")):
+                self.images += [(original, counterfactual) for original, counterfactual in zip(sorted(glob.glob(bucket_folder + "/original/*.png")), sorted(glob.glob(bucket_folder + "/counterfactual/*.png")))]
 
     def __len__(self):
         return len(self.images)

@@ -2,10 +2,11 @@
 import os
 from typing import Any, Callable, Dict, List, Optional, Union
 import torch
-from torchvision.transforms.v2.functional import resize
+from torchvision.transforms.v2.functional import center_crop, resize
 import requests
 from io import BytesIO
 from PIL import Image
+from zennit.composites import NameMapComposite
 from diffusers import AutoPipelineForImage2Image, StableDiffusionImg2ImgPipeline
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.image_processor import PipelineImageInput
@@ -14,7 +15,7 @@ from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import retrieve_timesteps, EXAMPLE_DOC_STRING
 
 from ldce.sampling_helpers import cone_project, cone_project_chuncked, cone_project_chuncked_zero, _renormalize_gradient
-
+from src.concept_cc_ddim import MaskHook, spatial_map, batch_map, _register_mask_fn
 
 class ModifiedStableDiffusionImg2ImgPipeline(StableDiffusionImg2ImgPipeline):
 
@@ -48,9 +49,16 @@ class ModifiedStableDiffusionImg2ImgPipeline(StableDiffusionImg2ImgPipeline):
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         classifier = None,
+        clf_transform = None,
         tgt=None,
         classifier_lambda=1.,
         deg_cone_projection=45,
+        lp_custom = 1,
+        dist_lambda = 0.7,
+        concept_conditioning=True,
+        concept_conditions = None,
+        spatial=False,
+        uncondition_end=True,
         **kwargs,
     ):
         r"""
@@ -286,65 +294,88 @@ class ModifiedStableDiffusionImg2ImgPipeline(StableDiffusionImg2ImgPipeline):
                         return_dict=False,
                     )[0]
 
-                    # print(f'noise pred {noise_pred.size()}')
-                    # print(f'x_noise {x_noise.size()}')
                     noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
                     
                     pred_x0_latent = self.compute_pred_x0(x_noise, t, noise_pred_uncond)
 
-                # perform guidance
-                # if self.do_classifier_free_guidance:
-                #     print("Performing classifier free guidance")
-                #     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                #     noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
-
-                ###############################
-                # Add own conditioning here ? #
-                ###############################
-                    latents = self.scheduler.step(noise_pred_uncond, t, latents, **extra_step_kwargs, return_dict=False)[0]
-
+                    # latentsstep = self.scheduler.step(noise_pred_uncond, t, latents, **extra_step_kwargs, return_dict=True) #[0]
+                    # latents = latentsstep.prev_sample
+                    # pred_x0_latent = latentsstep.pred_original_sample
+    
                     # with torch.enable_grad():
-                    pred_x0 = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
+                    pred_x0 = self.vae.decode(pred_x0_latent / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
                     # pred_x0 = self.vae.decode(x_noise / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
 
                     pred_x0 = self.image_processor.postprocess(pred_x0, output_type='pt', do_denormalize=[True] * pred_x0.shape[0])
 
-                    rpred_x0 = resize(pred_x0, (224, 224)).to(torch.float32)
+                    # rpred_x0 = center_crop(resize(pred_x0, (256, 256), antialias=True), (224, 224)).to(torch.float32)
+                    rpred_x0 = clf_transform(pred_x0)
 
+                with torch.no_grad():
 
-                    lp_custom = 0
+                    # lp_custom = 0
                     distance_criterion = torch.nn.L1Loss(reduction='sum')
 
                     if lp_custom:          # changed from elif
                         with torch.enable_grad():
-                            pred_x0_0to1 = torch.clamp(rpred_x0, min=0.0, max=1.0)
-                            print(pred_x0_0to1.size())
-                            print(image.size())
-                            lp_dist = distance_criterion(pred_x0_0to1, image.to(x_noise.device))
+                            pred_x0_0to1 = resize(pred_x0, (256, 256), antialias=False).to(torch.float32)
+                            # pred_x0_0to1 = resize(pred_x0, (512, 512)).to(torch.float32)
+                            # pred_x0_0to1 = torch.clamp(rpred_x0, min=0.0, max=1.0)
+                            image_resized = resize(image, (256, 256), antialias=False)
+
+                            lp_dist = distance_criterion(pred_x0_0to1, image_resized.to(x_noise.device))
+                            # print(lp_dist.mean().device)
                             lp_grad = torch.autograd.grad(lp_dist.mean(), x_noise, retain_graph=True)[0]
 
 
+                    with torch.enable_grad():
+                        if concept_conditioning:
+                            hook_map, y_targets = {}, []
 
-                    pred_logits = classifier(rpred_x0)
+                        # print(f'timestep: {t.item()}')
+                    # # Free up last 50 generation steps
+                            if not uncondition_end or t.item() >= 50:                               # TEST THIS FIRST
+                                for key in concept_conditions.keys():
+                                    if key not in hook_map:
+                                        hook_map[key] = MaskHook([])
+
+                                    if spatial:
+                                        _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
+                                    else:
+                                        _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
+
+                            name_map = [([name], hook) for name, hook in hook_map.items()]
+                            mask_composite = NameMapComposite(name_map)
+
+                            with mask_composite.context(classifier) as modified:
+                                # x = _map_img(pred_x0)
+                                # if not self.classifier_wrapper: # only works for ImageNet!
+                                #     x = tf.center_crop(x, 224)
+                                #     x = normalize(x)
+
+                                pred_logits = modified(rpred_x0)
+
+                        else:
+                            pred_logits = classifier(rpred_x0)
+                    # pred_logits = classifier(rpred_x0)
                     # pred_logits = self.get_classifier_logits(pred_x0)
                     # print(pred_logits)
 
-                    y=tgt.to(device)
+                        y=tgt.to(device)
 
-                    if len(pred_logits.shape) == 2: # multi-class
-                        # print("Multiclass model used. ")
-                        log_probs = torch.nn.functional.log_softmax(pred_logits, dim=-1)
-                        log_probs = log_probs[range(log_probs.size(0)), y.view(-1)]
-                        prob_best_class = torch.exp(log_probs).detach()
-                    else: # binary
-                        loss = self.binary_classification_criterion(pred_logits, y)
-                        loss *= -1 # minimize this
-                        log_probs = loss
-                        prob_best_class = pred_logits.sigmoid().detach()
+                        if len(pred_logits.shape) == 2: # multi-class
+                            # print("Multiclass model used. ")
+                            log_probs = torch.nn.functional.log_softmax(pred_logits, dim=-1)
+                            log_probs = log_probs[range(log_probs.size(0)), y.view(-1)]
+                            prob_best_class = torch.exp(log_probs).detach()
+                        else: # binary
+                            loss = self.binary_classification_criterion(pred_logits, y)
+                            loss *= -1 # minimize this
+                            log_probs = loss
+                            prob_best_class = pred_logits.sigmoid().detach()
 
-                    grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
+                        grad_classifier = torch.autograd.grad(log_probs.sum(), x_noise, retain_graph=True)[0]
 
-                        # print(f'grad classifier: {grad_classifier.size()}')
                 
                 implicit_classifier_score = (noise_pred_cond - noise_pred_uncond)
                 # implicit_classifier_score = (e_t - e_t_uncond)  # .detach()
@@ -352,7 +383,7 @@ class ModifiedStableDiffusionImg2ImgPipeline(StableDiffusionImg2ImgPipeline):
                 assert implicit_classifier_score.requires_grad == False, "implicit_classifier_score requires grad"
 
                 # lp_custom = 1
-                dist_lambda = 0.3
+                # dist_lambda = 0.3
                 use_original_steps = True
                 cone_projection_type = "zero_binning"
                 enforce_same_norms = True # False
@@ -411,9 +442,9 @@ class ModifiedStableDiffusionImg2ImgPipeline(StableDiffusionImg2ImgPipeline):
 
                     score_out -= lp_score
 
-                noise_pred = noise_pred_uncond + self.guidance_scale * score_out
+                # noise_pred = noise_pred_uncond + self.guidance_scale * score_out
 
-                # noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+                noise_pred = noise_pred_uncond + self.guidance_scale * implicit_classifier_score # (noise_pred_cond - noise_pred_uncond)
 
                     # noise_pred = self.perform_conditioning(noise_pred_uncond, noise_pred_cond, latents, x_noise, generator, classifier, y=tgt.to(device))
 
@@ -601,6 +632,7 @@ class ModifiedStableDiffusionImg2ImgPipeline(StableDiffusionImg2ImgPipeline):
             )
         
         # print(self.scheduler.config)
+        # print(type(self.scheduler))
 
         # 3. Clip or threshold "predicted x_0"
         # if self.scheduler.config.thresholding:

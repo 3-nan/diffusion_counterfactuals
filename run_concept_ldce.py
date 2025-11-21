@@ -54,6 +54,7 @@ from ldce.utils.preprocessor import Normalizer, CropAndNormalizer, ResizeAndNorm
 from utils.vision_language_wrapper import VisionLanguageWrapper
 from ldce.utils.madry_net import MadryNet
 from utils.dino_linear import LinearClassifier, DINOLinear
+from run_ldce_baseline import get_classifier, get_dataset
 
 def set_seed(seed: int = 0):
     torch.manual_seed(seed)
@@ -64,134 +65,134 @@ def set_seed(seed: int = 0):
 def blockPrint():
     sys.stdout = open(os.devnull, 'w')
 
-def get_classifier(cfg, device):
-    if "ImageNet" in cfg.data._target_:
-        classifier_name = cfg.classifier_model.name
-        if classifier_name == "robust_resnet50":
-            classifier_model = MadryNet(cfg.classifier_model.ckpt, device)
-            if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
-                classifier_model = Crop(classifier_model)
-        else:
-            classifier_model = getattr(torchvision.models, classifier_name)(pretrained=True)
-            if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
-                classifier_model = CropAndNormalizer(classifier_model)
-    # elif "CelebAHQDataset" in cfg.data._target_:
-    #     assert cfg.data.query_label in [20, 31, 39], 'Query label MUST be 20 (Gender), 31 (Smile), or 39 (Age) for CelebAHQ'
-    #     ql = 0
-    #     if cfg.data.query_label in [31, 39]:
-    #         ql = 1 if cfg.data.query_label == 31 else 2
-    #     classifier_model = DecisionDensenetModel(3, pretrained=False,
-    #                                        query_label=ql)
-    #     classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path, map_location='cpu')['model_state_dict'])
-    #     if cfg.classifier_model.classifier_wrapper:
-    #         classifier_model = Normalizer(
-    #             classifier_model,
-    #             [0.5] * 3, [0.5] * 3
-    #         )
-    elif "Flowers102" in cfg.data._target_:
+# def get_classifier(cfg, device):
+#     if "ImageNet" in cfg.data._target_:
+#         classifier_name = cfg.classifier_model.name
+#         if classifier_name == "robust_resnet50":
+#             classifier_model = MadryNet(cfg.classifier_model.ckpt, device)
+#             if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
+#                 classifier_model = Crop(classifier_model)
+#         else:
+#             classifier_model = getattr(torchvision.models, classifier_name)(pretrained=True)
+#             if "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper:
+#                 classifier_model = CropAndNormalizer(classifier_model)
+#     # elif "CelebAHQDataset" in cfg.data._target_:
+#     #     assert cfg.data.query_label in [20, 31, 39], 'Query label MUST be 20 (Gender), 31 (Smile), or 39 (Age) for CelebAHQ'
+#     #     ql = 0
+#     #     if cfg.data.query_label in [31, 39]:
+#     #         ql = 1 if cfg.data.query_label == 31 else 2
+#     #     classifier_model = DecisionDensenetModel(3, pretrained=False,
+#     #                                        query_label=ql)
+#     #     classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path, map_location='cpu')['model_state_dict'])
+#     #     if cfg.classifier_model.classifier_wrapper:
+#     #         classifier_model = Normalizer(
+#     #             classifier_model,
+#     #             [0.5] * 3, [0.5] * 3
+#     #         )
+#     elif "Flowers102" in cfg.data._target_:
 
-        classifier_name = cfg.classifier_model.name
+#         classifier_name = cfg.classifier_model.name
 
-        classifier_model = getattr(torchvision.models, classifier_name)()
-        num_ftrs = classifier_model.classifier[6].in_features
-        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 103)
-        state_dict = torch.load(cfg.classifier_model.classifier_path)
-        print(state_dict.keys())
-        classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
-        # fine-tuned Dino ViT B/8: https://arxiv.org/pdf/2104.14294.pdf
-        # dino = torch.hub.load('facebookresearch/dino:main', 'dino_vits8').to(device).eval()
-        # dim = dino.embed_dim
-        # linear_classifier = LinearClassifier(dim*cfg.classifier_model.n_last_blocks, 102)
-        # linear_classifier.load_state_dict(torch.load(cfg.classifier_model.classifier_path, map_location="cpu"), strict=True)
-        # linear_classifier = linear_classifier.eval().to(device)
-        # classifier_model = DINOLinear(dino, linear_classifier)
-        # transforms_list = [transforms.CenterCrop(224), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))]
-        # classifier_model = GenericPreprocessing(classifier_model, transforms.Compose(transforms_list))
-    elif "OxfordIIIPets" in cfg.data._target_:
+#         classifier_model = getattr(torchvision.models, classifier_name)()
+#         num_ftrs = classifier_model.classifier[6].in_features
+#         classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 103)
+#         state_dict = torch.load(cfg.classifier_model.classifier_path)
+#         print(state_dict.keys())
+#         classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
+#         # fine-tuned Dino ViT B/8: https://arxiv.org/pdf/2104.14294.pdf
+#         # dino = torch.hub.load('facebookresearch/dino:main', 'dino_vits8').to(device).eval()
+#         # dim = dino.embed_dim
+#         # linear_classifier = LinearClassifier(dim*cfg.classifier_model.n_last_blocks, 102)
+#         # linear_classifier.load_state_dict(torch.load(cfg.classifier_model.classifier_path, map_location="cpu"), strict=True)
+#         # linear_classifier = linear_classifier.eval().to(device)
+#         # classifier_model = DINOLinear(dino, linear_classifier)
+#         # transforms_list = [transforms.CenterCrop(224), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))]
+#         # classifier_model = GenericPreprocessing(classifier_model, transforms.Compose(transforms_list))
+#     elif "OxfordIIIPets" in cfg.data._target_:
 
-        classifier_name = cfg.classifier_model.name
+#         classifier_name = cfg.classifier_model.name
 
-        classifier_model = getattr(torchvision.models, classifier_name)()
-        num_ftrs = classifier_model.classifier[6].in_features
-        classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 37)
-        state_dict = torch.load(cfg.classifier_model.classifier_path)
-        print(state_dict.keys())
-        classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
+#         classifier_model = getattr(torchvision.models, classifier_name)()
+#         num_ftrs = classifier_model.classifier[6].in_features
+#         classifier_model.classifier[6] = torch.nn.Linear(num_ftrs, 37)
+#         state_dict = torch.load(cfg.classifier_model.classifier_path)
+#         print(state_dict.keys())
+#         classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
 
-        # # zero-shot OpenClip: https://arxiv.org/pdf/2212.07143.pdf
-        # model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')
-        # model = model.to(device).eval()
-        # tokenizer = open_clip.get_tokenizer('ViT-B-32')
-        # # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
-        # with open("data/pets_idx_to_label.json", "r") as f:
-        #     pets_idx_to_classname = json.load(f)
-        # prompts = [f"a photo of a {label}, a type of pet." for label in pets_idx_to_classname.values()]
-        # classifier_model = VisionLanguageWrapper(model, tokenizer, prompts)
-        # # try running optimization on 224x224 pixel image
-        # # transforms_list = [preprocess.transforms[0], preprocess.transforms[1], preprocess.transforms[4]]
-        # if cfg.classifier_model.classifier_wrapper:
-        #     transforms_list = [preprocess.transforms[1], preprocess.transforms[4]] # CenterCrop(224, 224), Normalize
-        #     classifier_model = GenericPreprocessing(classifier_model, transforms.Compose(transforms_list))
-    else:
-        raise NotImplementedError
-    return classifier_model
+#         # # zero-shot OpenClip: https://arxiv.org/pdf/2212.07143.pdf
+#         # model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')
+#         # model = model.to(device).eval()
+#         # tokenizer = open_clip.get_tokenizer('ViT-B-32')
+#         # # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
+#         # with open("data/pets_idx_to_label.json", "r") as f:
+#         #     pets_idx_to_classname = json.load(f)
+#         # prompts = [f"a photo of a {label}, a type of pet." for label in pets_idx_to_classname.values()]
+#         # classifier_model = VisionLanguageWrapper(model, tokenizer, prompts)
+#         # # try running optimization on 224x224 pixel image
+#         # # transforms_list = [preprocess.transforms[0], preprocess.transforms[1], preprocess.transforms[4]]
+#         # if cfg.classifier_model.classifier_wrapper:
+#         #     transforms_list = [preprocess.transforms[1], preprocess.transforms[4]] # CenterCrop(224, 224), Normalize
+#         #     classifier_model = GenericPreprocessing(classifier_model, transforms.Compose(transforms_list))
+#     else:
+#         raise NotImplementedError
+#     return classifier_model
 
-def get_dataset(cfg, last_data_idx: int = 0):
-    if "ImageNet" in cfg.data._target_:
-        out_size = 256
-        transform_list = [
-            transforms.Resize((out_size, out_size)),
-            transforms.ToTensor()
-        ]
-        transform = transforms.Compose(transform_list)
-        dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
-    elif "CelebAHQDataset" in cfg.data._target_:
-        dataset = instantiate(
-            cfg.data,
-            image_size=256, 
-            data_dir=cfg.data.data_dir, 
-            random_crop=False, 
-            random_flip=False, 
-            partition='test',
-            query_label=cfg.data.query_label,
-            normalize=False,
-            shard=cfg.data.shard,
-            num_shards=cfg.data.num_shards,
-            restart_idx=last_data_idx
-        )
-    elif "Flowers102" in cfg.data._target_:
-        transform = transforms.Compose([
-            transforms.Resize((256, 256)),
-            transforms.ToTensor(),
-        ])
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
-        def _convert_to_rgb(image):
-            return image.convert('RGB')
-        out_size = 256
-        transform_list = [
-            transforms.Resize((out_size, out_size)),
-            # transforms.CenterCrop(out_size),
-            _convert_to_rgb,
-            transforms.ToTensor(),
-        ]
-        transform = transforms.Compose(transform_list)
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    else:
-        raise NotImplementedError
-    return dataset
+# def get_dataset(cfg, last_data_idx: int = 0):
+#     if "ImageNet" in cfg.data._target_:
+#         out_size = 256
+#         transform_list = [
+#             transforms.Resize((out_size, out_size)),
+#             transforms.ToTensor()
+#         ]
+#         transform = transforms.Compose(transform_list)
+#         dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
+#     elif "CelebAHQDataset" in cfg.data._target_:
+#         dataset = instantiate(
+#             cfg.data,
+#             image_size=256, 
+#             data_dir=cfg.data.data_dir, 
+#             random_crop=False, 
+#             random_flip=False, 
+#             partition='test',
+#             query_label=cfg.data.query_label,
+#             normalize=False,
+#             shard=cfg.data.shard,
+#             num_shards=cfg.data.num_shards,
+#             restart_idx=last_data_idx
+#         )
+#     elif "Flowers102" in cfg.data._target_:
+#         transform = transforms.Compose([
+#             transforms.Resize((256, 256)),
+#             transforms.ToTensor(),
+#         ])
+#         dataset = instantiate(
+#             cfg.data, 
+#             shard=cfg.data.shard, 
+#             num_shards=cfg.data.num_shards, 
+#             transform=transform, 
+#             restart_idx=last_data_idx
+#         )
+#     elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
+#         def _convert_to_rgb(image):
+#             return image.convert('RGB')
+#         out_size = 256
+#         transform_list = [
+#             transforms.Resize((out_size, out_size)),
+#             # transforms.CenterCrop(out_size),
+#             _convert_to_rgb,
+#             transforms.ToTensor(),
+#         ]
+#         transform = transforms.Compose(transform_list)
+#         dataset = instantiate(
+#             cfg.data, 
+#             shard=cfg.data.shard, 
+#             num_shards=cfg.data.num_shards, 
+#             transform=transform, 
+#             restart_idx=last_data_idx
+#         )
+#     else:
+#         raise NotImplementedError
+#     return dataset
 
 @hydra.main(version_base=None, config_path="configs/ldce", config_name="v1")
 def main(cfg : DictConfig) -> None:
@@ -292,7 +293,7 @@ def main(cfg : DictConfig) -> None:
     if "ImageNet" in cfg.data._target_:
         i2h = name_map
         num_classes = 1000
-    elif "CelebAHQDataset" in cfg.data._target_:
+    elif "CelebAHQDataset" in cfg.data._target_ or "CelebA" in cfg.data._target_:
         # query label 31 (smile): label=0 <-> no smile and label=1 <-> smile
         # query label 39 (age): label=0 <-> old and label=1 <-> young
         assert cfg.data.query_label in [2, 4, 31, 39]
@@ -306,6 +307,7 @@ def main(cfg : DictConfig) -> None:
             i2h = ["not bald", "bald"]
         else:
             raise NotImplementedError
+        num_classes = 1
     elif "Flowers102" in cfg.data._target_:
         with open("data/flowers_idx_to_label.json", "r") as f:
             flowers_idx_to_classname = json.load(f)
@@ -318,6 +320,10 @@ def main(cfg : DictConfig) -> None:
             pets_idx_to_classname = json.load(f)
         i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
         num_classes = 37
+    elif "CUB" in cfg.data._target_:
+        # i2h = dataset.dataset.get_class_names()
+        i2h = {int(k): v for k, v in enumerate(pets_idx_to_classname.items())}
+        num_classes = 200
     else:
         raise NotImplementedError
 
@@ -355,10 +361,14 @@ def main(cfg : DictConfig) -> None:
             image, label, unique_data_idx = batch
             if "ImageNet" in cfg.data._target_:
                 tgt_classes = torch.tensor([random.choice(synset_closest_idx[l.item()]) for l in label]).to(device)
-            elif "CelebAHQDataset" in cfg.data._target_:
-                tgt_classes = (1 - label).type(torch.float32)
+            elif "CelebAHQDataset" in cfg.data._target_ or "CelebA" in cfg.data._target_:
+                # tgt_classes = (1 - label).type(torch.float32)
+                tgt_classes = (1 - label).type(torch.int64)
             elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
                 tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
+            elif "CUB" in cfg.data._target_:
+                # tgt_classes = torch.tensor([random.randint(0, 199) for l in label]).to(device)
+                tgt_classes = torch.tensor([l + 1 % 200 for l in label]).to(device)
             else:
                 raise NotImplementedError
 
@@ -383,6 +393,14 @@ def main(cfg : DictConfig) -> None:
         #shuffle tgt_classes
         #random.shuffle(tgt_classes)
 
+        # if "CelebA" in cfg.data._target_:
+        #     tgt_classes = label
+
+        # print(label)
+        # print(tgt_classes)
+        label = label.unsqueeze(0)
+        tgt_classes = tgt_classes.unsqueeze(0)
+
         # Compute concept conditions
         # ToDo: add sampler.classifier_wrapper as parameter
         if spatial:
@@ -398,7 +416,7 @@ def main(cfg : DictConfig) -> None:
             else:
                 logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
             # TODO: handle binary vs multi-class
-            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_: # multi-class
+            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_: # multi-class
                 in_class_pred = logits.argmax(dim=1)
                 in_confid = logits.softmax(dim=1).max(dim=1).values
                 in_confid_tgt =  logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
@@ -425,7 +443,7 @@ def main(cfg : DictConfig) -> None:
         if "txt" == model.cond_stage_key: # text-conditional
             if "ImageNet" in cfg.data._target_:
                 prompts = [f"a photo of a {openai_imagenet_classes[idx.item()]}." for idx in tgt_classes]
-            elif "CelebAHQDataset" in cfg.data._target_:
+            elif "CelebAHQDataset" in cfg.data._target_ or "CelebA" in cfg.data._target_:
                 # query label 31 (smile): label=0 <-> no smile and label=1 <-> smile
                 # query label 39 (age): label=0 <-> old and label=1 <-> young
                 assert cfg.data.query_label in [31, 39]
@@ -448,6 +466,9 @@ def main(cfg : DictConfig) -> None:
             elif "Flowers102" in cfg.data._target_:
                 # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
                 prompts = [f"a photo of a {i2h[idx.item()]}, a type of flower." for idx in tgt_classes]
+            elif "CUB" in cfg.data._target_:
+                # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
+                prompts = [f"a photo of a {i2h[idx.item()]}, a type of bird." for idx in tgt_classes]
             else:
                 raise NotImplementedError
         else:
@@ -544,7 +565,7 @@ def main(cfg : DictConfig) -> None:
                     }
                     data_dict = dict(data_dict, **cgs_results)
 
-            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
+            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_:
                 uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
             else:
                 uidx = unique_data_idx[j].item()

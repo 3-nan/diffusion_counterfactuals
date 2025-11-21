@@ -31,7 +31,7 @@ COPY ca-certificates /usr/local/share/ca-certificates
 RUN apt-get install --yes --no-install-recommends ca-certificates
 RUN update-ca-certificates
 
-RUN pip3 install corelay[umap,hdbscan] opencv-python seaborn open_clip_torch accelerate diffusers sentencepiece --no-cache-dir
+RUN pip3 install zennit corelay[umap,hdbscan] opencv-python seaborn open_clip_torch pytorch-fid accelerate diffusers sentencepiece --no-cache-dir
 
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_DIR=/etc/ssl/certs
@@ -62,3 +62,6 @@ COPY test_stuff.py ./test_stuff.py
 
 # CMD ["python", "src/diffusers/run_diffusers.py", "--config-name=v1_celeba"]
 CMD ["python", "src/diffusers/run_diffusers.py", "--config-name=v1_diffusers"]
+# CMD ["python", "src/diffusers/run_diffusers.py", "--config-name=v1_diffusers_pets"]
+
+# CMD ["python", "run_evaluation.py", "--output-path=/results/counterfactuals/diffusers_stability_pets_vit_concept_200_scale_9"]
