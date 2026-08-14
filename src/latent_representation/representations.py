@@ -9,15 +9,16 @@ def store_hook(module, input, output):
     # keep the output tensor gradient, even if it is not a leaf-tensor
     output.retain_grad()
 
-def compute_layer_attributions(classifier, imgs, targets, layers=None):
+def compute_layer_attributions(classifier, imgs, targets, layers=None, num_classes=1000):
     """ Compute explanations. """
 
     # create a composite
     canonizers = [zennit.torchvision.VGGCanonizer()]
     composite = zennit.composites.EpsilonGammaBox(0., 1., gamma=0.1, canonizers=canonizers)
-    # choose a target class for the attribution
-    target = torch.eye(1000)[targets]
-    target = target.to(targets.device)
+    # choose a target class for the attribution -- num_classes must match the
+    # classifier's output width (1000 for ImageNet, 196 for StanfordCars, etc.),
+    # otherwise the one-hot target is the wrong length for the backward pass.
+    target = torch.eye(num_classes, device=targets.device)[targets]
 
     modules = []
     for n, m in classifier.named_modules():

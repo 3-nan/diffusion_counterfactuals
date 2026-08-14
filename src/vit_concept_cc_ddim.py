@@ -208,6 +208,32 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
         Concept guidance shall be added.
     """
 
+    def _resolve_layer_name(self, name):
+        """Resolve a (possibly short) concept-layer name to the exact module
+        name present in ``self.classifier``.
+
+        The config's ``concept_layer`` (e.g. ``encoder.ln``) is written relative
+        to the bare classifier, but ``self.classifier`` is a preprocessing
+        wrapper (``ResizeAndNormalizer`` for vit_b_16), so its ``named_modules()``
+        prefixes everything with ``classifier.`` (-> ``classifier.encoder.ln``).
+        Both the ``NameMapComposite`` mask hook and ``_append_recording_layer_hooks``
+        match module names *exactly*, so we must hand them the real, prefixed
+        name -- otherwise the mask silently fails to attach and the recording
+        hook never populates ``layer_out`` (KeyError). This mirrors the suffix
+        fallback in ``compute_concept_conditioning`` so both sides agree.
+        """
+        modules = dict(self.classifier.named_modules())
+        if name in modules:
+            return name
+        matches = [n for n in modules if n.endswith("." + name)]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise KeyError(
+                f"Ambiguous concept_layer '{name}' matches multiple modules: {matches}")
+        raise KeyError(
+            f"concept_layer '{name}' not found in classifier modules")
+
     def conditional_score(self, x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale=1, unconditional_conditioning=None, y=None):
         # return super().conditional_score(x, t, c, index, use_original_steps, quantize_denoised, unconditional_guidance_scale, unconditional_conditioning, y)
         """
@@ -471,15 +497,20 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                     # if t[0].item() >= 50:                               # TEST THIS FIRST
                     if not uncondition_end or t[0].item() >= 50:
                         for key in concept_conditions.keys():
-                            if key not in hook_map:
-                                hook_map[key] = MaskHook([])
+                            # Resolve the config-relative concept layer name to
+                            # the wrapped classifier's real module path so the
+                            # mask hook (NameMapComposite) and the recording hook
+                            # actually attach to it.
+                            full_key = self._resolve_layer_name(key)
+                            if full_key not in hook_map:
+                                hook_map[full_key] = MaskHook([])
 
                             if spatial:
-                                _register_mask_fn(hook_map[key], spatial_map, 0, concept_conditions[key], key)
+                                _register_mask_fn(hook_map[full_key], spatial_map, 0, concept_conditions[key], full_key)
                             else:
-                                _register_mask_fn(hook_map[key], batch_map, 0, concept_conditions[key], key)
+                                _register_mask_fn(hook_map[full_key], batch_map, 0, concept_conditions[key], full_key)
 
-                            handles, layer_out = _append_recording_layer_hooks(self.classifier, [], None, [key])
+                            handles, layer_out = _append_recording_layer_hooks(self.classifier, [], None, [full_key])
 
 
                     name_map = [([name], hook) for name, hook in hook_map.items()]
@@ -526,7 +557,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                         if not uncondition_end or t[0].item() >= 50:
 
                             try:
-                                grad = torch.autograd.grad((log_probs*grad_tensors.T).T, inputs=layer_out[key], grad_outputs=grad_tensors, retain_graph=True)
+                                grad = torch.autograd.grad((log_probs*grad_tensors.T).T, inputs=layer_out[full_key], grad_outputs=grad_tensors, retain_graph=True)
 
                             except RuntimeError as e:
                                 if "allow_unused=True" not in str(e):
@@ -543,7 +574,7 @@ class ConceptCCMDDIMSampler(CCMDDIMSampler):
                                     " Please make sure to start with the last and end with the first layer in each condition dict. In addition,"
                                     " parallel layers can not be used in one condition.")
 
-                            wrt_tensor, grad_tensors = layer_out[key], grad
+                            wrt_tensor, grad_tensors = layer_out[full_key], grad
 
                             torch.autograd.backward(wrt_tensor, grad_tensors, retain_graph=True)
                             # grad_classifier = torch.autograd.grad(x.grad, x_noise, retain_graph=True)[0]

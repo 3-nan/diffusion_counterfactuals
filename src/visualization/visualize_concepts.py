@@ -30,6 +30,7 @@ from src.concept_conditioning import compute_concept_conditioning
 # from src.helpers.data_model_helpers import get_classifier
 from run_ldce_baseline import get_classifier
 from run_ldce_baseline import get_dataset
+from run_ldce_baseline import dataset_tag
 from src.helpers.concept_visualization import plot_grid
 
 def set_seed(seed: int = 0):
@@ -88,22 +89,18 @@ def set_seed(seed: int = 0):
 def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx, base_label, cf_label, attr="relevance"):
 
     if cfg.classifier_model.name == 'vgg16_bn' and "ImageNet" in cfg.data._target_:
-        fv_path = '/results/counterfactuals/fv_imagenet_vgg16bn'
+        fv_path = '/results/counterfactuals/fv_imagenet_vgg16bn'  # legacy path, kept as-is
     else:
-        if "ImageNet" in cfg.data._target_:
-            fv_path = f'/results/counterfactuals/fv_imagenet_{cfg.classifier_model.name}'
-        elif "Flowers" in cfg.data._target_:
-            fv_path = f'/results/counterfactuals/fv_flowers_{cfg.classifier_model.name}'
-        elif "Pets" in cfg.data._target_:
-            fv_path = f'/results/counterfactuals/fv_pets_{cfg.classifier_model.name}'
-        elif "CUB" in cfg.data._target_:
-            fv_path = f'/results/counterfactuals/fv_cub_{cfg.classifier_model.name}'
+        fv_path = f'/results/counterfactuals/fv_{dataset_tag(cfg)}_{cfg.classifier_model.name}'
 
     print(fv_path)
 
     attribution = CondAttribution(model)
     canonizers = [SequentialMergeBatchNorm()]
-    composite = EpsilonPlusFlat(canonizers)
+    # canonizers is keyword-only as of zennit>=0.5 (positional in the
+    # zennit<=0.4.6 that zennit-crp's metadata still pins) -- pass it
+    # explicitly so this doesn't silently bind to the epsilon arg instead.
+    composite = EpsilonPlusFlat(canonizers=canonizers)
 
     cc = ChannelConcept()
 
@@ -139,14 +136,10 @@ def visualize_concepts(cfg, dataset, model, layer, concepts, concept_diff, uidx,
     print(ref_t_all)
     print(concept_diff)
     plot_grid(ref_t_all, concept_diff=concept_diff, figsize=(6, 9), padding=False)
-    if "ImageNet" in cfg.data._target_:
-        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
-    elif "Flowers" in cfg.data._target_:
-        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'flowers_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
-    elif "Pets" in cfg.data._target_:
-        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'pets_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
-    elif "CUB" in cfg.data._target_:
-        plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'cub_{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
+    tag = dataset_tag(cfg)
+    prefix = "" if tag == "imagenet" else f"{tag}_"  # legacy imagenet filenames have no prefix
+    os.makedirs('/results/counterfactuals/fv_images', exist_ok=True)
+    plt.savefig(os.path.join('/results/counterfactuals/fv_images', f'{prefix}{cfg.classifier_model.name}_{cfg.concept_layer}_{str(uidx).zfill(5)}_ref_{attr}_concept_class.svg'))
     plt.close()
 
 
@@ -243,6 +236,13 @@ def main(cfg : DictConfig) -> None:
     else:
         ref_cfg_dict['data'].update({"return_index": False})
     #     ref_cfg_dict['data'].update({"start_sample": 1})
+    if dataset_tag(cfg) in ("cars", "boxcars", "cub"):
+        # Must match crp/run_feature_visualization.py's split override --
+        # get_max_reference/get_stats_reference index into that stats
+        # database by sample index, so this reference dataset has to be
+        # built from the exact same split (train) the stats were computed
+        # against, not cfg.data.split ('test', used for generation).
+        ref_cfg_dict['data']['split'] = "train"
     print(ref_cfg_dict["data"])
 
     # ref_cfg_dict = {
@@ -289,7 +289,7 @@ def main(cfg : DictConfig) -> None:
         with open("data/pets_idx_to_label.json", "r") as f:
             pets_idx_to_classname = json.load(f)
         i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
-    elif "CUB" in cfg.data._target_:
+    elif "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_:
         i2h = {int(k): v for k, v in enumerate(dataset.dataset.get_class_names())}
     else:
         raise NotImplementedError
@@ -306,7 +306,19 @@ def main(cfg : DictConfig) -> None:
             closest_indices = json.load(file)
         closest_indices = {int(k):v for k,v in closest_indices.items()}
 
+    # cfg.concept_layer (e.g. "features.37") is the plain, unwrapped-classifier
+    # path -- but the fv stats on disk (crp/run_feature_visualization.py) were
+    # written keyed by get_layer_names() on classifier_model as actually
+    # loaded, which for StanfordCars/BoxCars116k is Normalizer(vgg16_bn),
+    # nesting everything under "classifier." (e.g. "classifier.features.37").
+    # Resolve to the real module path the same way compute_concept_
+    # conditioning() already does, or get_max_reference/get_stats_reference
+    # below 404 trying to load "<fv_path>/RelMax_sum_normed/features.37_data.npy".
     concept_layer = cfg.concept_layer       # "backbone.features.29"
+    for name, _ in classifier_model.named_modules():
+        if name == concept_layer or name.endswith("." + concept_layer):
+            concept_layer = name
+            break
     spatial = cfg.spatial
 
     attr = "relevance"          # relevance     activation
@@ -351,7 +363,7 @@ def main(cfg : DictConfig) -> None:
 
         for j in range(batch_size):
             # Read conditions from file
-            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_:
+            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_:
                 uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
             else:
                 uidx = unique_data_idx[j].item()
@@ -397,7 +409,7 @@ def main(cfg : DictConfig) -> None:
 
                 layer_handle = None
                 for n, m in classifier_model.named_modules():
-                    if n == cfg.concept_layer:
+                    if n == concept_layer:
                         layer_handle = m
 
                 layer_handle.register_forward_hook(acts_hook)

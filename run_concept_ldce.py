@@ -29,6 +29,7 @@ from torchvision.utils import save_image
 
 from src.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
 from src.sampling_helpers import load_model_hf
+from finetune_minisd_lora import inject_lora, load_lora_state_dict
 import json
 
 from src.concept_conditioning import compute_concept_conditioning
@@ -55,6 +56,7 @@ from utils.vision_language_wrapper import VisionLanguageWrapper
 from ldce.utils.madry_net import MadryNet
 from utils.dino_linear import LinearClassifier, DINOLinear
 from run_ldce_baseline import get_classifier, get_dataset
+from data.datasets import closest_indices_path, select_subset_indices
 
 def set_seed(seed: int = 0):
     torch.manual_seed(seed)
@@ -246,6 +248,14 @@ def main(cfg : DictConfig) -> None:
     model = get_model(cfg_path=cfg.diffusion_model.cfg_path, ckpt_path = cfg.diffusion_model.ckpt_path).to(device).eval()
     print('model loaded')
 
+    if cfg.diffusion_model.get("lora_path"):
+        # rank/alpha travel with the checkpoint (finetune_minisd_lora.py saves
+        # them alongside lora_state_dict) so inject_lora matches training exactly.
+        lora_ckpt = torch.load(cfg.diffusion_model.lora_path, map_location="cpu")
+        inject_lora(model.model.diffusion_model, rank=lora_ckpt["rank"], alpha=lora_ckpt["alpha"])
+        load_lora_state_dict(model.model.diffusion_model, lora_ckpt["lora_state_dict"])
+        print(f"loaded LoRA adapter from {cfg.diffusion_model.lora_path}")
+
     classifier_model = get_classifier(cfg, device)
     classifier_model.to(device).eval()
     classifier_model.train = disabled_train
@@ -285,7 +295,7 @@ def main(cfg : DictConfig) -> None:
     
     #data_path = cfg.data_path
     dataset = get_dataset(cfg, last_data_idx=last_data_idx)
-    dataset = torch.utils.data.Subset(dataset, np.arange(1000))
+    dataset = torch.utils.data.Subset(dataset, select_subset_indices(dataset, cfg.data._target_, n=1000))
     print(type(dataset))
     print("dataset length: ", len(dataset))
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=4)
@@ -324,6 +334,12 @@ def main(cfg : DictConfig) -> None:
         # i2h = dataset.dataset.get_class_names()
         i2h = {int(k): v for k, v in enumerate(pets_idx_to_classname.items())}
         num_classes = 200
+    elif "StanfordCars" in cfg.data._target_:
+        i2h = dataset.dataset.get_class_names()
+        num_classes = 196
+    elif "BoxCars116k" in cfg.data._target_:
+        i2h = dataset.dataset.get_class_names()
+        num_classes = len(i2h)
     else:
         raise NotImplementedError
 
@@ -331,11 +347,19 @@ def main(cfg : DictConfig) -> None:
         with open('data/synset_closest_idx.yaml', 'r') as file:
             synset_closest_idx = yaml.safe_load(file)
     elif "Flowers102" in cfg.data._target_:
-        with open("data/flowers_closest_indices.json") as file:
+        with open(closest_indices_path("flowers", cfg.classifier_model.name)) as file:
             closest_indices = json.load(file)
         closest_indices = {int(k):v for k,v in closest_indices.items()}
     elif "OxfordIIIPets" in cfg.data._target_:
-        with open("data/pets_closest_indices.json") as file:
+        with open(closest_indices_path("pets", cfg.classifier_model.name)) as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
+    elif "StanfordCars" in cfg.data._target_:
+        with open(closest_indices_path("cars", cfg.classifier_model.name)) as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
+    elif "BoxCars116k" in cfg.data._target_:
+        with open(closest_indices_path("boxcars", cfg.classifier_model.name)) as file:
             closest_indices = json.load(file)
         closest_indices = {int(k):v for k,v in closest_indices.items()}
 
@@ -364,7 +388,7 @@ def main(cfg : DictConfig) -> None:
             elif "CelebAHQDataset" in cfg.data._target_ or "CelebA" in cfg.data._target_:
                 # tgt_classes = (1 - label).type(torch.float32)
                 tgt_classes = (1 - label).type(torch.int64)
-            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
+            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_:
                 tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
             elif "CUB" in cfg.data._target_:
                 # tgt_classes = torch.tensor([random.randint(0, 199) for l in label]).to(device)
@@ -403,10 +427,18 @@ def main(cfg : DictConfig) -> None:
 
         # Compute concept conditions
         # ToDo: add sampler.classifier_wrapper as parameter
+        clf_wrapper = "classifier_wrapper" in cfg.classifier_model and cfg.classifier_model.classifier_wrapper
+        # tgt_classes was unsqueezed to [1, batch_size] above to match the
+        # [n_samples, batch] convention used by generate_samples()'s outputs
+        # later in this loop -- but compute_concept_conditioning indexes
+        # torch.eye(num_classes) with it to build a one-hot target aligned
+        # with the classifier's [batch_size, num_classes] output, so it needs
+        # the plain [batch_size] shape back here, not [1, batch_size].
+        cc_tgt_classes = tgt_classes.squeeze(0)
         if spatial:
-            conditions, concept_conds, concept_diff = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, num_classes=num_classes, spatial=spatial, cond_option=cfg.cond_option)
+            conditions, concept_conds, concept_diff = compute_concept_conditioning(classifier_model, image, cc_tgt_classes, concept_layer, num_concepts=cfg.num_concepts, num_classes=num_classes, spatial=spatial, cond_option=cfg.cond_option, classifier_wrapper=clf_wrapper)
         else:
-            conditions, concept_conds, concept_diff = compute_concept_conditioning(classifier_model, image, tgt_classes, concept_layer, num_concepts=cfg.num_concepts, num_classes=num_classes, cond_option=cfg.cond_option)
+            conditions, concept_conds, concept_diff = compute_concept_conditioning(classifier_model, image, cc_tgt_classes, concept_layer, num_concepts=cfg.num_concepts, num_classes=num_classes, cond_option=cfg.cond_option, classifier_wrapper=clf_wrapper)
 
         #get classifcation prediction
         with torch.inference_mode():
@@ -416,7 +448,7 @@ def main(cfg : DictConfig) -> None:
             else:
                 logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
             # TODO: handle binary vs multi-class
-            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_: # multi-class
+            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_: # multi-class
                 in_class_pred = logits.argmax(dim=1)
                 in_confid = logits.softmax(dim=1).max(dim=1).values
                 in_confid_tgt =  logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
@@ -469,6 +501,15 @@ def main(cfg : DictConfig) -> None:
             elif "CUB" in cfg.data._target_:
                 # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
                 prompts = [f"a photo of a {i2h[idx.item()]}, a type of bird." for idx in tgt_classes]
+            elif "StanfordCars" in cfg.data._target_:
+                # class names are already fully descriptive (make/model/year,
+                # e.g. "Suzuki Aerio Sedan 2007"), no "a type of X" qualifier needed
+                prompts = [f"a photo of a {i2h[idx.item()]}." for idx in tgt_classes]
+            elif "BoxCars116k" in cfg.data._target_:
+                # class names are already fully descriptive (make/model/
+                # submodel/year) and match finetune_minisd_lora.py's
+                # CAPTION_TEMPLATE = "a photo of a {}." exactly
+                prompts = [f"a photo of a {i2h[idx.item()]}." for idx in tgt_classes]
             else:
                 raise NotImplementedError
         else:
@@ -506,7 +547,7 @@ def main(cfg : DictConfig) -> None:
                 logits = classifier_model(all_samples[0])
             else:
                 logits = sampler.get_classifier_logits(_unmap_img(all_samples[0])) #converting to -1, 1 (it is converted back in the function)
-            if "ImageNet" in cfg.data._target_ or "CUB" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_: # multi-class
+            if "ImageNet" in cfg.data._target_ or "CUB" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_: # multi-class
                 out_class_pred = logits.argmax(dim=1)
                 out_confid = logits.softmax(dim=1).max(dim=1).values
                 out_confid_tgt = logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
@@ -565,7 +606,7 @@ def main(cfg : DictConfig) -> None:
                     }
                     data_dict = dict(data_dict, **cgs_results)
 
-            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_:
+            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_:
                 uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
             else:
                 uidx = unique_data_idx[j].item()

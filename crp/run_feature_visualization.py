@@ -1,240 +1,111 @@
+"""Compute CRP feature-visualization statistics: for every channel/concept in
+every Conv2d/Linear layer, cache which samples maximally activate it (and
+which get maximum relevance per class), so visualize_concepts.py's
+get_max_reference()/get_stats_reference() can look them up later.
+
+Hydra-driven like the rest of the pipeline -- pass --config-name=v1_cars,
+v1_boxcars, v1_pets, v1_flowers, v1_cub, etc. Reuses get_classifier/
+get_dataset from run_ldce_baseline.py instead of duplicating per-dataset
+model-loading/weights-path logic here.
+
+Runs once per dataset+classifier; heavy (a full forward+backward pass per
+sample), so shard across GPUs with cfg.data.shard/num_shards like the
+generation scripts do.
+"""
 import sys
 sys.path.append("./")
 sys.path.append("./ldce")
 sys.path.append("./data")
-import timm
+
+import hydra
 import torch
-import torchvision
-from torchvision.models.resnet import resnet18, resnet50
-from torchvision.models.vgg import vgg16_bn, vgg16
-from torchvision.models import vit_b_16
 import torchvision.transforms as T
-from PIL import Image
 import zennit
+from omegaconf import DictConfig, OmegaConf
 from zennit.canonizers import SequentialMergeBatchNorm
 from zennit.composites import EpsilonPlusFlat
 from zennit.torchvision import ResNetCanonizer
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 
 from crp.concepts import ChannelConcept
 from crp.helper import get_layer_names
 from crp.attribution import CondAttribution
 from crp.visualization import FeatureVisualization
 
-def get_dataset(cfg, last_data_idx: int = 0):
+from run_ldce_baseline import get_classifier, get_dataset, dataset_tag
+
+
+@hydra.main(version_base=None, config_path="../configs/ldce", config_name="v1")
+def main(cfg: DictConfig) -> None:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    classifier_model = get_classifier(cfg, device)
+    classifier_model.to(device).eval()
+
+    model_name = cfg.classifier_model.name
+    if model_name.startswith("vgg"):
+        # canonizers is keyword-only as of zennit>=0.5 (positional in the
+        # zennit<=0.4.6 that zennit-crp's metadata still pins) -- pass it
+        # explicitly so this doesn't silently bind to the epsilon arg instead.
+        composite = EpsilonPlusFlat(canonizers=[SequentialMergeBatchNorm()])
+    elif model_name.startswith("resnet"):
+        composite = EpsilonPlusFlat(canonizers=[ResNetCanonizer()])
+    elif model_name.startswith("vit"):
+        layer_map_rules = [
+            (zennit.types.Activation, zennit.rules.Pass()),  # ignore activations
+            (zennit.types.AvgPool, zennit.rules.Norm()),  # normalize relevance for any AvgPool
+            (zennit.types.Convolution, zennit.rules.Epsilon(epsilon=1e-6)),
+            (zennit.types.Linear, zennit.rules.Epsilon(epsilon=1e-6)),
+        ]
+        composite = zennit.composites.LayerMapComposite(layer_map=layer_map_rules)
+    else:
+        raise ValueError(f"please specify canonizers and composite for '{model_name}'")
+
+    cc = ChannelConcept()
+    layer_names = get_layer_names(classifier_model, [torch.nn.Conv2d, torch.nn.Linear])
+    layer_map = {layer: cc for layer in layer_names}
+
+    attribution = CondAttribution(classifier_model)
+
+    # FeatureVisualization needs (img, label) pairs, not the (img, label,
+    # index) triples get_dataset()'s datasets return by default -- override
+    # return_index/return_tgt_cls the same way visualize_concepts.py's
+    # ref_cfg_dict does.
+    fv_cfg_dict = {"data": dict(cfg["data"])}
     if "ImageNet" in cfg.data._target_:
-        out_size = 256
-        transform_list = [
-            T.Resize((out_size, out_size)),
-            T.ToTensor()
-        ]
-        transform = T.Compose(transform_list)
-        dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
-    elif "Flowers102" in cfg.data._target_:
-        transform = T.Compose([
-            T.Resize((256, 256)),
-            T.ToTensor(),
-        ])
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    elif "OxfordIIIPets" in cfg.data._target_: # try running on 224x224 img
-        def _convert_to_rgb(image):
-            return image.convert('RGB')
-        out_size = 256
-        transform_list = [
-            T.Resize((out_size, out_size)),
-            # transforms.CenterCrop(out_size),
-            _convert_to_rgb,
-            T.ToTensor(),
-        ]
-        transform = T.Compose(transform_list)
-        dataset = instantiate(
-            cfg.data, 
-            shard=cfg.data.shard, 
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
-    elif "CUB" in cfg.data._target_:
-        out_size = cfg.data.image_size
-        transform_list = [
-            T.Resize((out_size, out_size)),
-            # transforms.CenterCrop(out_size),
-            # _convert_to_rgb,
-            T.ToTensor(),
-        ]
-        transform = T.Compose(transform_list)
-        print(cfg.data)
-        dataset = instantiate(
-            cfg.data,
-            shard=cfg.data.shard,
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
-            restart_idx=last_data_idx
-        )
+        fv_cfg_dict["data"].update({"return_tgt_cls": False})
     else:
-        raise NotImplementedError
-    return dataset
+        fv_cfg_dict["data"].update({"return_index": False})
+    if dataset_tag(cfg) in ("cars", "boxcars", "cub"):
+        # Reference samples should come from what actually shaped the
+        # concept -- training data -- even though cfg.data.split is 'test'
+        # in these yamls (shared with run_ldce_baseline.py/run_concept_ldce.py,
+        # which generate counterfactuals against the test set and must stay
+        # on it). Override only this local copy, not the shared config.
+        # ImageNet's dataset class only implements split='val' (asserted at
+        # construction), and Flowers102/OxfordIIIPets hardcode split="test"
+        # internally regardless of what's passed -- skip the override there.
+        fv_cfg_dict["data"]["split"] = "train"
+    fv_cfg = OmegaConf.create(fv_cfg_dict)
+    dataset = get_dataset(fv_cfg, last_data_idx=0)
+    print(f"dataset length: {len(dataset)}")
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
-# data_name = "imagenet"
-# data_name = "flowers"
-data_name = "cub"
-# data_name = "pets"
-
-model_name = "vit_base_patch16_224"
-# model_name = "vgg16_bn"
-# model_name = "resnet18"
-
-if data_name == "cub":
-    model = timm.create_model(model_name, pretrained=False, num_classes=200)
-else:
-    if model_name == "vgg16":
-        model = vgg16(True).to(device)
-    elif model_name == "vgg16_bn":
-        model = vgg16_bn(True).to(device)
-    elif model_name == "resnet18":
-        model = resnet18(True).to(device)
-    elif model_name == "resnet50":
-        model = resnet50(True).to(device)
-    elif model_name == "vit_b_16":
-        model = vit_b_16(True).to(device)
+    # get_classifier() already wraps the StanfordCars/BoxCars116k classifiers
+    # in Normalizer (ImageNet-normalize, no crop, see run_ldce_baseline.py's
+    # comments), so normalizing again here would double-normalize -- only
+    # the raw ImageNet/Flowers/Pets/CUB models need it applied externally.
+    if dataset_tag(cfg) in ("cars", "boxcars"):
+        preprocessing = None
     else:
-        raise ValueError(f'model_name {model_name} not in list, please verify!')
+        preprocessing = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
-if data_name == "flowers":
-    weights_path = "/results/models/vgg16bn_flowers_20240503_122623_78_0.870"
-    num_ftrs = model.classifier[6].in_features
-    model.classifier[6] = torch.nn.Linear(num_ftrs, 103)
-    model.load_state_dict(torch.load(weights_path))
-    model.to(device)
+    fv_path = f"/results/counterfactuals/fv_{dataset_tag(cfg)}_{model_name}"
+    print(f"writing feature-visualization stats to {fv_path}")
 
-elif data_name == "pets":
-    weights_path = "/results/models/vgg16bn_pets_20240503_092321_7_0.92"
-    num_ftrs = model.classifier[6].in_features
-    model.classifier[6] = torch.nn.Linear(num_ftrs, 37)
-    model.load_state_dict(torch.load(weights_path))
-    model.to(device)
+    fv = FeatureVisualization(attribution, dataset, layer_map, preprocess_fn=preprocessing, path=fv_path)
 
-elif data_name == "cub":
-    weights_path = f"/results/models/{model_name}/caltech_birds_{model_name}_dict.pth"
-    model.load_state_dict(torch.load(weights_path))
-    model.to(device)
+    batch_size = cfg.get("fv_batch_size", 32)
+    fv.run(composite, 0, len(dataset), batch_size=batch_size)
 
-model.eval()
 
-if model_name.startswith('vgg'):
-    canonizers = [SequentialMergeBatchNorm()]
-    composite = EpsilonPlusFlat(canonizers)
-elif model_name.startswith('resnet'):
-    canonizers = [ResNetCanonizer()]
-    composite = EpsilonPlusFlat(canonizers)
-elif model_name.startswith('vit'):
-    layer_map = [
-    (zennit.types.Activation, zennit.rules.Pass()),  # ignore activations
-    (zennit.types.AvgPool, zennit.rules.Norm()),  # normalize relevance for any AvgPool
-    (zennit.types.Convolution, zennit.rules.Epsilon(epsilon=1e-6)),  # any convolutional layer
-    (zennit.types.Linear, zennit.rules.Epsilon(epsilon=1e-6))  # this is the dense Linear, not any
-]
-    composite = zennit.composites.LayerMapComposite(layer_map=layer_map)
-else:
-    raise ValueError('please specify canonizers and composite')
-
-# Concept definition
-cc = ChannelConcept()
-
-layer_names = get_layer_names(model, [torch.nn.Conv2d, torch.nn.Linear])
-layer_map = {layer : cc for layer in layer_names}
-
-attribution = CondAttribution(model)
-
-# separate normalization from resizing for plotting purposes later
-transform = T.Compose([T.Resize(256), T.CenterCrop(224), T.ToTensor()])
-preprocessing =  T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-
-# data_path = '/Data/imagenet/val'
-    
-# apply no normalization here!
-# imagenet_data = torchvision.datasets.ImageNet(data_path, transform=transform, split="val")
-
-# out_size = 256
-# transform_list = [
-#     T.Resize((out_size, out_size)),
-#     T.ToTensor()
-# ]
-# transform = T.Compose(transform_list)
-# # dataset = instantiate(cfg.data, start_sample=cfg.data.start_sample, end_sample=cfg.data.end_sample, transform=transform, restart_idx=last_data_idx)
-# dataset = torchvision.datasets.ImageNet(data_path, transform=transform, split="val", start_sample=10, end_sample=50)
-
-if data_name == "imagenet":
-    cfg_dict = {
-        'data': {
-            '_target_': 'data.datasets.ImageNet',
-            'root': '/Data/imagenet/val',
-            'idx_to_tgt_cls_path': './ldce/data/image_idx_to_tgt.yaml',
-            'split': 'val',
-            'return_tgt_cls': False,
-            # 'batch_size': 4
-            'start_sample': 10,
-            'end_sample': 50
-            }
-    }
-    fv_path = f"/results/counterfactuals/fv_imagenet_{model_name}"
-elif data_name == "pets":
-    cfg_dict = {
-        'data': {
-            '_target_': 'data.datasets.OxfordIIIPets',
-            'root': '/Data/PETS',
-            'return_tgt_cls': False,
-            'return_index': False,
-            'shard': 0,
-            'num_shards': 7
-        }
-    }
-    fv_path = f"/results/counterfactuals/fv_pets_{model_name}"
-elif data_name == "flowers":
-    cfg_dict = {
-        'data': {
-            '_target_': 'data.datasets.Flowers102',
-            'root': "/Data/flowers",
-            'return_tgt_cls': False,
-            'return_index': False,
-            'shard': 0,
-            'num_shards': 1,
-        }
-#   'batch_size': 4
-    }
-    fv_path = f"/results/counterfactuals/fv_flowers_{model_name}"
-elif data_name == "cub":
-    cfg_dict = {
-        'data': {
-            '_target_': 'data.datasets.CUB',
-            'root': "/Data/CUB_200_2011",
-            'return_tgt_cls': False,
-            'return_index': False,
-            'shard': 0,
-            'num_shards': 7,
-            'image_size': 224, #256,
-        }
-#   'batch_size': 4
-    }
-    fv_path = f"/results/counterfactuals/fv_cub_{model_name}"
-
-cfg = OmegaConf.create(cfg_dict)
-dataset = get_dataset(cfg)
-
-print(len(dataset))
-print(dataset.get_class_names())
-print(len(dataset.get_class_names()))
-
-fv = FeatureVisualization(attribution, dataset, layer_map, preprocess_fn=preprocessing, path=fv_path)
-
-# it will take approximately 20 min on a Titan RTX
-saved_files = fv.run(composite, 0, len(dataset), batch_size=32) #, 100)
+if __name__ == "__main__":
+    main()

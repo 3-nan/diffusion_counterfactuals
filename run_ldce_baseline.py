@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import os
 # import psutil
 import yaml
@@ -30,6 +31,7 @@ import timm
 
 from ldce.sampling_helpers import disabled_train, get_model, _unmap_img, generate_samples
 from src.sampling_helpers import load_model_hf
+from finetune_minisd_lora import inject_lora, load_lora_state_dict
 import json
 
 
@@ -51,6 +53,8 @@ from ldce.utils.preprocessor import Normalizer, CropAndNormalizer, ResizeAndNorm
 # from utils.vision_language_wrapper import VisionLanguageWrapper
 from ldce.utils.madry_net import MadryNet
 # from utils.dino_linear import LinearClassifier, DINOLinear
+from data.datasets import letterbox_resize, closest_indices_path, select_subset_indices
+
 
 def set_seed(seed: int = 0):
     torch.manual_seed(seed)
@@ -170,6 +174,40 @@ def get_classifier(cfg, device):
         state_dict = torch.load(cfg.classifier_model.classifier_path)
         print(state_dict.keys())
         classifier_model.load_state_dict(torch.load(cfg.classifier_model.classifier_path))
+    elif "StanfordCars" in cfg.data._target_:
+        # finetune_classifier.py saves the full nn.Module (torch.save(model, ...)),
+        # not a state_dict -- unlike the Flowers/Pets/CUB branches above, which
+        # load into a freshly constructed architecture.
+        classifier_model = torch.load(cfg.classifier_model.classifier_path, map_location=device, weights_only=False)
+        if cfg.classifier_model.name.startswith("vit"):
+            # vit_b_16 has a fixed 224 patch grid and was finetuned/validated at
+            # letterbox_resize(224) (see finetune_classifier.py). pred_x0 is a
+            # square 256px image, so a plain Resize->(224,224) is identical to
+            # letterbox here (a square needs no padding), and it avoids ViT's
+            # hardcoded 224 assertion that a Normalizer (no resize) would trip.
+            classifier_model = ResizeAndNormalizer(classifier_model, resolution=(224, 224))
+        else:
+            # CCMDDIMSampler.get_classifier_logits() hardcodes a center_crop(x, 224)
+            # + normalize fallback for any classifier without classifier_wrapper=True
+            # ("# only works for ImageNet!" in cc_ddim.py) -- fine for the Pets/
+            # Flowers configs, whose classifiers are vit_base_patch16_224 (genuinely
+            # 224-native), but wrong here: finetune_classifier.py deliberately trains
+            # and validates this VGG16bn/resnet18 at 256px (see its docstring -- "Train
+            # at 256, not 224"), so that fallback was silently re-cropping every image
+            # queried during sampling down to 224 regardless of what get_dataset()'s
+            # transform produced. Wrapping in Normalizer (256px in, ImageNet-
+            # normalize, no crop) + classifier_wrapper: True in the config makes
+            # get_classifier_logits skip its own fallback and defer to this instead.
+            classifier_model = Normalizer(classifier_model)
+    elif "BoxCars116k" in cfg.data._target_:
+        # Same story as StanfordCars above -- finetune_classifier.py saves the
+        # full nn.Module and trains/validates at 256px for the conv nets, while
+        # vit_b_16 is 224-native, so the wrapper is arch-dependent here too.
+        classifier_model = torch.load(cfg.classifier_model.classifier_path, map_location=device, weights_only=False)
+        if cfg.classifier_model.name.startswith("vit"):
+            classifier_model = ResizeAndNormalizer(classifier_model, resolution=(224, 224))
+        else:
+            classifier_model = Normalizer(classifier_model)
     else:
         raise NotImplementedError
     return classifier_model
@@ -248,13 +286,79 @@ def get_dataset(cfg, last_data_idx: int = 0, transform=None):
         dataset = instantiate(
             cfg.data,
             shard=cfg.data.shard,
-            num_shards=cfg.data.num_shards, 
-            transform=transform, 
+            num_shards=cfg.data.num_shards,
+            transform=transform,
+            restart_idx=last_data_idx
+        )
+    elif "StanfordCars" in cfg.data._target_:
+        out_size = cfg.data.image_size
+        # Letterbox (resize-to-fit + pad), not Resize(out_size)+CenterCrop --
+        # CenterCrop was trimming the car's nose/tail off landscape-shaped
+        # bbox crops since the crop only ever removes from the *longer* side.
+        # This keeps the full crop_to_bbox content and true proportions, no
+        # stretching and no cropping, at the cost of some grey padding on the
+        # shorter axis. Note: this is a (much milder) departure from
+        # finetune_classifier.py / compute_closest_indices.py's Resize+
+        # CenterCrop, which the classifier was actually trained/indexed on --
+        # letterbox padding + a slightly smaller in-frame car is a smaller
+        # distribution shift than either stretching or cropping content out,
+        # but it's not zero. Worth aligning finetune_classifier.py's val
+        # transform the same way (and recomputing cars_closest_indices.json)
+        # if the classifier's steering gradients look off downstream.
+        transform_list = [
+            transforms.Lambda(lambda img: letterbox_resize(img, out_size)),
+            transforms.ToTensor(),
+        ]
+        transform = transforms.Compose(transform_list)
+        dataset = instantiate(
+            cfg.data,
+            shard=cfg.data.shard,
+            num_shards=cfg.data.num_shards,
+            transform=transform,
+            restart_idx=last_data_idx
+        )
+    elif "BoxCars116k" in cfg.data._target_:
+        # BoxCars116k crops are already tighter than StanfordCars but still
+        # rectangular enough (up to ~2.3:1, see evaluate_minisd_lora.py's
+        # make_eval_transform comment) to lose vehicle content under
+        # CenterCrop -- same letterbox reasoning as StanfordCars above.
+        out_size = cfg.data.image_size
+        transform_list = [
+            transforms.Lambda(lambda img: letterbox_resize(img, out_size)),
+            transforms.ToTensor(),
+        ]
+        transform = transforms.Compose(transform_list)
+        dataset = instantiate(
+            cfg.data,
+            shard=cfg.data.shard,
+            num_shards=cfg.data.num_shards,
+            transform=transform,
             restart_idx=last_data_idx
         )
     else:
         raise NotImplementedError
     return dataset
+
+def dataset_tag(cfg) -> str:
+    """Short name for cfg.data._target_, used to namespace per-dataset output
+    paths (fv_<tag>_<classifier>, etc.) consistently across scripts that
+    import get_classifier/get_dataset from here."""
+    tgt = cfg.data._target_
+    if "ImageNet" in tgt:
+        return "imagenet"
+    if "CelebAHQDataset" in tgt or "CelebA" in tgt:
+        return "celeba"
+    if "Flowers102" in tgt:
+        return "flowers"
+    if "OxfordIIIPets" in tgt:
+        return "pets"
+    if "CUB" in tgt:
+        return "cub"
+    if "StanfordCars" in tgt:
+        return "cars"
+    if "BoxCars116k" in tgt:
+        return "boxcars"
+    raise NotImplementedError(tgt)
 
 @hydra.main(version_base=None, config_path="configs/ldce", config_name="v1")
 def main(cfg : DictConfig) -> None:
@@ -306,7 +410,15 @@ def main(cfg : DictConfig) -> None:
     print(f"using device: {device}")
 
     model = get_model(cfg_path=cfg.diffusion_model.cfg_path, ckpt_path = cfg.diffusion_model.ckpt_path).to(device).eval()
-    
+
+    if cfg.diffusion_model.get("lora_path"):
+        # rank/alpha travel with the checkpoint (finetune_minisd_lora.py saves
+        # them alongside lora_state_dict) so inject_lora matches training exactly.
+        lora_ckpt = torch.load(cfg.diffusion_model.lora_path, map_location="cpu")
+        inject_lora(model.model.diffusion_model, rank=lora_ckpt["rank"], alpha=lora_ckpt["alpha"])
+        load_lora_state_dict(model.model.diffusion_model, lora_ckpt["lora_state_dict"])
+        print(f"loaded LoRA adapter from {cfg.diffusion_model.lora_path}")
+
     classifier_model = get_classifier(cfg, device)
     classifier_model.to(device).eval()
     classifier_model.train = disabled_train
@@ -341,7 +453,8 @@ def main(cfg : DictConfig) -> None:
     
     #data_path = cfg.data_path
     dataset = get_dataset(cfg, last_data_idx=last_data_idx)
-    dataset = torch.utils.data.Subset(dataset, np.arange(1000))
+    indices = select_subset_indices(dataset, cfg.data._target_, n=1000)
+    dataset = torch.utils.data.Subset(dataset, indices)
     print(type(dataset))
     print("dataset length: ", len(dataset))
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=4)
@@ -374,6 +487,10 @@ def main(cfg : DictConfig) -> None:
         i2h = {int(k): v for k, v in pets_idx_to_classname.items()}
     elif "CUB" in cfg.data._target_:
         i2h = dataset.dataset.get_class_names()
+    elif "StanfordCars" in cfg.data._target_:
+        i2h = dataset.dataset.get_class_names()
+    elif "BoxCars116k" in cfg.data._target_:
+        i2h = dataset.dataset.get_class_names()
     else:
         raise NotImplementedError
 
@@ -381,11 +498,19 @@ def main(cfg : DictConfig) -> None:
         with open('data/synset_closest_idx.yaml', 'r') as file:
             synset_closest_idx = yaml.safe_load(file)
     elif "Flowers102" in cfg.data._target_:
-        with open("data/flowers_closest_indices.json") as file:
+        with open(closest_indices_path("flowers", cfg.classifier_model.name)) as file:
             closest_indices = json.load(file)
         closest_indices = {int(k):v for k,v in closest_indices.items()}
     elif "OxfordIIIPets" in cfg.data._target_:
-        with open("data/pets_closest_indices.json") as file:
+        with open(closest_indices_path("pets", cfg.classifier_model.name)) as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
+    elif "StanfordCars" in cfg.data._target_:
+        with open(closest_indices_path("cars", cfg.classifier_model.name)) as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
+    elif "BoxCars116k" in cfg.data._target_:
+        with open(closest_indices_path("boxcars", cfg.classifier_model.name)) as file:
             closest_indices = json.load(file)
         closest_indices = {int(k):v for k,v in closest_indices.items()}
 
@@ -412,14 +537,14 @@ def main(cfg : DictConfig) -> None:
                 tgt_classes = (1 - label).type(torch.float32)
             elif "CelebAHQDataset" in cfg.data._target_:
                 tgt_classes = (1 - label).type(torch.float32)
-            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_:
+            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_:
                 tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
             elif "CUB" in cfg.data._target_:
                 # tgt_classes = torch.tensor([random.randint(0, 199) for l in label]).to(device)
                 tgt_classes = torch.tensor([l + 1 % 200 for l in label]).to(device)
             else:
                 raise NotImplementedError
-        
+
         if "CelebA" not in cfg.data._target_:
             if "counterfactual_target" in cfg:
                 if cfg.counterfactual_target == "baseline":
@@ -449,7 +574,7 @@ def main(cfg : DictConfig) -> None:
             else:
                 logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
             # TODO: handle binary vs multi-class
-            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_: # multi-class
+            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_: # multi-class
                 in_class_pred = logits.argmax(dim=1)
                 in_confid = logits.softmax(dim=1).max(dim=1).values
                 in_confid_tgt =  logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
@@ -515,6 +640,15 @@ def main(cfg : DictConfig) -> None:
             elif "CUB" in cfg.data._target_:
                 # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
                 prompts = [f"a photo of a {i2h[idx.item()]}, a type of bird." for idx in tgt_classes]
+            elif "StanfordCars" in cfg.data._target_:
+                # class names are already fully descriptive (make/model/year,
+                # e.g. "Suzuki Aerio Sedan 2007"), no "a type of X" qualifier needed
+                prompts = [f"a photo of a {i2h[idx.item()]}." for idx in tgt_classes]
+            elif "BoxCars116k" in cfg.data._target_:
+                # class names are already fully descriptive (make/model/
+                # submodel/year) and match finetune_minisd_lora.py's
+                # CAPTION_TEMPLATE = "a photo of a {}." exactly
+                prompts = [f"a photo of a {i2h[idx.item()]}." for idx in tgt_classes]
             else:
                 raise NotImplementedError
         else:
@@ -548,7 +682,7 @@ def main(cfg : DictConfig) -> None:
                 logits = classifier_model(all_samples[0])
             else:
                 logits = sampler.get_classifier_logits(_unmap_img(all_samples[0])) #converting to -1, 1 (it is converted back in the function)
-            if "ImageNet" in cfg.data._target_ or "CUB" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_: # multi-class
+            if "ImageNet" in cfg.data._target_ or "CUB" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_: # multi-class
                 out_class_pred = logits.argmax(dim=1)
                 out_confid = logits.softmax(dim=1).max(dim=1).values
                 out_confid_tgt = logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
@@ -605,7 +739,7 @@ def main(cfg : DictConfig) -> None:
             #         }
             #         data_dict = dict(data_dict, **cgs_results)
 
-            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_:
+            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_ or "BoxCars116k" in cfg.data._target_:
                 uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
             else:
                 uidx = unique_data_idx[j].item()

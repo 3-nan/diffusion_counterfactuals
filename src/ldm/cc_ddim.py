@@ -363,7 +363,7 @@ class CCMDDIMSampler(object):
                                             orig_shp=implicit_classifier_score.shape) \
                 if self.guidance == "projected" else classifier_score
             
-            verbose = True
+            verbose = False  # per-timestep gradient dump for show_gradient_alignment.py; expensive, off by default
             if verbose:
                 for yt, yval in enumerate(y):
                     np.save(f'/results/counterfactuals/class_grad_eval/grad_{yt}_{t[0].item()}_grad_classifier', grad_classifier.cpu().numpy())

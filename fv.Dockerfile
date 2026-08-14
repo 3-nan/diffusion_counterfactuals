@@ -1,51 +1,32 @@
-# From pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
-From pytorch/pytorch:1.11.0-cuda11.3-cudnn8-runtime
+# Separate image for CRP feature visualization (crp/run_feature_visualization.py,
+# src/visualization/visualize_concepts.py).
+#
+# zennit-crp 0.6.0 declares torch<2.0.0, zennit<=0.4.6, numpy<=1.23.5 (see
+# `pip show zennit-crp`). Installing it straight into vehicles.Dockerfile's
+# environment (confirmed live, the hard way) makes pip silently downgrade
+# torch 2.1.0 -> 1.13.1, which then conflicts with kornia/accelerate (both
+# require torch>=2.0) and drags in a torchvision build compiled against a
+# different CUDA major version than the downgraded torch, breaking
+# torchvision.extension at import time. Hence a separate image.
+#
+# This was originally `FROM pytorch/pytorch:1.11.0-cuda11.3-cudnn8-runtime`,
+# but Docker Hub pulls aren't reliably available from this host (see
+# vehicles.Dockerfile's own note on this -- same class of problem, confirmed
+# again here: `podman pull pytorch/pytorch:1.11.0-...` fails with
+# "authentication required" fetching the blob). Building on top of the
+# already-built `vehicles` image instead needs no fresh pull, already has
+# everything CRP's own code needs at import time (run_ldce_baseline.py pulls
+# in ldce/timm/pytorch_lightning etc. just by being imported, even though
+# run_feature_visualization.py only calls get_classifier/get_dataset from
+# it), and --no-deps below keeps CRP's stale upper-bound pins from ever
+# touching torch/zennit/numpy -- CRP's actual code is plain hook-based
+# forward/backward attribution, nothing torch-2.x-specific breaks it, only
+# its packaged metadata's bounds are stale (never bumped upstream).
+FROM localhost/vehicles:latest
 
-RUN apt-get update
+RUN pip3 install --no-cache-dir --no-deps "git+https://github.com/rachtibat/zennit-crp.git"
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN pip3 install --upgrade pip
-
-RUN apt install -y git
-RUN apt-get -y install cmake
-RUN apt install build-essential -y
-
-COPY requirements.txt ./requirements.txt
-RUN pip3 install -r requirements.txt
-
-RUN pip3 install certifi timm --no-cache-dir
-COPY ca-certificates /usr/local/share/ca-certificates
-RUN apt-get install --yes --no-install-recommends ca-certificates 
-# software-properties-common ca-certificates
-# RUN chmod 644 /usr/local/share/ca-certificates/continental.crt
-# RUN chmod 644 /usr/local/share/ca-certificates/conti-corp-it-security.crt
-RUN update-ca-certificates
-
-RUN pip3 install corelay
-
-RUN pip3 install git+https://github.com/rachtibat/zennit-crp.git
-RUN git clone https://github.com/lmb-freiburg/ldce.git
-
-# ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-ENV SSL_CERT_DIR=/etc/ssl/certs
-
-ENV HYDRA_FULL_ERROR=1
-
-RUN export HDF5_USE_FILE_LOCKING='FALSE'
-
-# COPY ./ldce/ldm/ ./ldm
-
-COPY configs/ ./configs
-COPY data/ ./data
-COPY models/ ./models
-COPY run_ldce_baseline.py ./run_ldce_baseline.py
-COPY src/ ./src
-COPY crp/ ./crp
-
-# CMD ["python", "crp/run_feature_visualization.py"]
-# CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_concept"]
-# CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_pets"]
-# CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_flowers"]
-CMD ["python", "src/visualization/visualize_concepts.py", "--config-name=v1_cub"]
-# CMD ["python", "src/visualization/visualize_conditioning.py", "--config-name=v1_concept"]
+# No COPY here on purpose -- same reasoning as vehicles.Dockerfile: bind-mount
+# the repo at runtime (`-v $(pwd):/workspace`, or via podman as vehicles-dev/2
+# already do) rather than baking files in, so editing
+# crp/run_feature_visualization.py doesn't require a rebuild.

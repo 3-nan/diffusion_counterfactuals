@@ -10,6 +10,7 @@ import numpy as np
 from omegaconf import DictConfig, OmegaConf, open_dict
 from torchvision.transforms.functional import center_crop, resize, to_tensor
 from torchvision.utils import save_image
+from torchvision import transforms as tv_transforms
 from torchvision.models import VGG16_BN_Weights, ResNet18_Weights, ViT_B_16_Weights
 import torch
 from diffusers import StableDiffusionImg2ImgPipeline, DiffusionPipeline
@@ -17,6 +18,7 @@ from diffusers import StableDiffusionImg2ImgPipeline, DiffusionPipeline
 from ldce.data.imagenet_classnames import name_map, openai_imagenet_classes
 from run_ldce_baseline import set_seed, get_dataset, get_classifier, blockPrint
 from pipeline import ModifiedStableDiffusionImg2ImgPipeline
+from pipeline_sd3 import ModifiedStableDiffusion3Img2ImgPipeline
 from kandinsky_pipeline import ModifiedKandinskyImg2ImgPipeline
 
 from src.concept_conditioning import compute_concept_conditioning
@@ -24,6 +26,16 @@ from src.concept_conditioning import compute_concept_conditioning
 def get_transforms(cfg):
 
     model_name = cfg.classifier_model.name
+
+    if "StanfordCars" in cfg.data._target_:
+        # vgg16_bn_cars is 256px-native (finetune_classifier.py) and
+        # get_dataset() already letterboxes to cfg.data.image_size before this
+        # runs -- unlike the generic torchvision/timm ImageNet weights below
+        # (all 224-native), this only needs to normalize, not resize/crop
+        # again. Same "not every classifier is 224-native" fix as
+        # run_ldce_baseline.py's get_classifier() Normalizer wrapper.
+        from finetune_classifier import IMAGENET_MEAN, IMAGENET_STD
+        return tv_transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD)
 
     if model_name == "vgg16_bn":
         weights = VGG16_BN_Weights.IMAGENET1K_V1
@@ -128,6 +140,21 @@ def main(cfg : DictConfig) -> None:
         pipe = pipe.to(device)
         # pipe.enable_model_cpu_offload()
 
+    elif cfg.diffusion_type == "sd3":
+        # Gated weights: accept the license at
+        # https://huggingface.co/stabilityai/stable-diffusion-3.5-medium and
+        # pass HF_TOKEN (env var or `huggingface-cli login`) for the
+        # from_pretrained download below; local_model_path skips that once
+        # you've saved a local snapshot once.
+        local_model_path = "/results/models/stable-diffusion-3.5-medium"
+        if os.path.isdir(local_model_path):
+            pipe = ModifiedStableDiffusion3Img2ImgPipeline.from_pretrained(local_model_path, torch_dtype=torch.float16)
+        else:
+            model_id_or_path = "stabilityai/stable-diffusion-3.5-medium"
+            pipe = ModifiedStableDiffusion3Img2ImgPipeline.from_pretrained(model_id_or_path, torch_dtype=torch.float16)
+            pipe.save_pretrained(local_model_path)
+        pipe = pipe.to(device)
+
     elif cfg.diffusion_type == "kandinsky":
         # cpu_device = torch.device('cpu')
         local_model_path = "/results/models/kandinsky-3"
@@ -189,6 +216,8 @@ def main(cfg : DictConfig) -> None:
         with open("data/cub_idx_to_label.json", "r") as f:
             cub_idx_to_classname = json.load(f)
         i2h = {int(k): v for k, v in cub_idx_to_classname.items()}
+    elif "StanfordCars" in cfg.data._target_:
+        i2h = dataset.dataset.get_class_names()
     else:
         raise NotImplementedError
 
@@ -209,6 +238,11 @@ def main(cfg : DictConfig) -> None:
         num_classes = 40
     elif "CUB" in cfg.data._target_:
         num_classes = 200
+    elif "StanfordCars" in cfg.data._target_:
+        num_classes = 196
+        with open("data/cars_closest_indices.json") as file:
+            closest_indices = json.load(file)
+        closest_indices = {int(k):v for k,v in closest_indices.items()}
 
     if not cfg.resume:
         torch.save({"last_data_idx": -1}, checkpoint_path)
@@ -233,7 +267,7 @@ def main(cfg : DictConfig) -> None:
                 tgt_classes = (1 - label).type(torch.float32)
             elif "CelebAHQDataset" in cfg.data._target_:
                 tgt_classes = (1 - label).type(torch.float32)
-            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" or "CUB" in cfg.data._target_:
+            elif "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_:
                 tgt_classes = torch.tensor([closest_indices[unique_data_idx[l].item()*cfg.data.num_shards + cfg.data.shard][0] for l in range(label.shape[0])]).to(device)
             else:
                 raise NotImplementedError
@@ -286,7 +320,7 @@ def main(cfg : DictConfig) -> None:
                 # logits = sampler.get_classifier_logits(_unmap_img(image)) #converting to -1, 1
                 # raise NotImplementedError
             # TODO: handle binary vs multi-class
-            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_: # multi-class
+            if "ImageNet" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_: # multi-class
                 in_class_pred = logits.argmax(dim=1)
                 in_confid = logits.softmax(dim=1).max(dim=1).values
                 in_confid_tgt =  logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
@@ -354,6 +388,11 @@ def main(cfg : DictConfig) -> None:
                 # prompts following https://github.com/openai/CLIP/blob/main/data/prompts.md
                 prompts = [f"a photo of a {i2h[idx.item()]}, a type of bird." for idx in tgt_classes]
                 negative_prompts = ["" for idx in tgt_classes]
+            elif "StanfordCars" in cfg.data._target_:
+                # class names are already fully descriptive (make/model/year,
+                # e.g. "Suzuki Aerio Sedan 2007"), no "a type of X" qualifier needed
+                prompts = [f"a photo of a {i2h[idx.item()]}." for idx in tgt_classes]
+                negative_prompts = ["" for idx in tgt_classes]
             else:
                 raise NotImplementedError
         else:
@@ -408,7 +447,7 @@ def main(cfg : DictConfig) -> None:
                 # print(type(gen_images))
                 print(f'is size 224? {gen_images.size()}')
                 logits = classifier_model(gen_images)
-            if "ImageNet" in cfg.data._target_ or "CUB" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "CUB" in cfg.data._target_: # multi-class
+            if "ImageNet" in cfg.data._target_ or "CUB" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "Flowers102" in cfg.data._target_ or "StanfordCars" in cfg.data._target_: # multi-class
                 out_class_pred = logits.argmax(dim=1)
                 out_confid = logits.softmax(dim=1).max(dim=1).values
                 out_confid_tgt = logits.softmax(dim=1)[torch.arange(batch_size), tgt_classes]
@@ -458,7 +497,7 @@ def main(cfg : DictConfig) -> None:
                 # "closness_2": lp2,
             }
 
-            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_:
+            if "Flowers102" in cfg.data._target_ or "OxfordIIIPets" in cfg.data._target_ or "CUB" in cfg.data._target_ or "StanfordCars" in cfg.data._target_:
                 uidx = unique_data_idx[j].item()*cfg.data.num_shards + cfg.data.shard
             else:
                 uidx = unique_data_idx[j].item()

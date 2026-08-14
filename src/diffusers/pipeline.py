@@ -442,11 +442,16 @@ class ModifiedStableDiffusionImg2ImgPipeline(StableDiffusionImg2ImgPipeline):
 
                     score_out -= lp_score
 
-                # noise_pred = noise_pred_uncond + self.guidance_scale * score_out
-
-                noise_pred = noise_pred_uncond + self.guidance_scale * implicit_classifier_score # (noise_pred_cond - noise_pred_uncond)
-
-                    # noise_pred = self.perform_conditioning(noise_pred_uncond, noise_pred_cond, latents, x_noise, generator, classifier, y=tgt.to(device))
+                # score_out is the (cone-projected, renormalized) classifier + distance
+                # guidance signal -- matching CCMDDIMSampler.get_output() in cc_ddim.py,
+                # which drives e_t from e_t_uncond + scale*score_out, not from plain CFG.
+                # This was previously falling back to noise_pred_uncond + scale *
+                # implicit_classifier_score (vanilla CFG, the text-prompt direction with
+                # no classifier gradient applied at all) -- score_out was computed above
+                # (cone-projected classifier_score and lp_score both feed into it) but
+                # never used, so this pipeline was silently doing plain img2img with no
+                # counterfactual steering whenever it was run.
+                noise_pred = noise_pred_uncond + self.guidance_scale * score_out
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, orig_latents, **extra_step_kwargs, return_dict=False)[0]
