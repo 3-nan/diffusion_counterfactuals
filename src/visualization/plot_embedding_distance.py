@@ -32,15 +32,15 @@ FID = {
     ("vgg16bn", "cars", "baseline"): (18.61, 17.45, 19.77),
     ("vgg16bn", "cars", "concept"): (18.69, 17.59, 19.80),
     ("vgg16bn", "boxcars", "baseline"): (22.03, 20.75, 23.32),
-    ("vgg16bn", "boxcars", "concept"): (35.56, 34.17, 36.94),
+    ("vgg16bn", "boxcars", "concept"): (22.01, 20.67, 23.34),
     ("resnet18", "cars", "baseline"): (18.49, 17.34, 19.63),
     ("resnet18", "cars", "concept"): (18.56, 17.42, 19.70),
     ("resnet18", "boxcars", "baseline"): (22.44, 21.11, 23.78),
-    ("resnet18", "boxcars", "concept"): (39.25, 37.62, 40.89),
+    ("resnet18", "boxcars", "concept"): (22.96, 21.57, 24.34),
     ("vit_b_16", "cars", "baseline"): (19.71, 18.45, 20.98),
     ("vit_b_16", "cars", "concept"): (19.93, 18.66, 21.20),
     ("vit_b_16", "boxcars", "baseline"): (23.38, 21.98, 24.77),
-    ("vit_b_16", "boxcars", "concept"): (36.17, 34.74, 37.60),
+    ("vit_b_16", "boxcars", "concept"): (23.03, 21.61, 24.44),
 }
 
 

@@ -25,6 +25,7 @@ Usage (host or any container with torch/matplotlib):
     python src/visualization/plot_baseline_vs_concept.py ... --uidx 0 3 5 9
 """
 import os
+import glob
 import argparse
 
 import numpy as np
@@ -61,10 +62,27 @@ def select_batches(baseline_dir, concept_dir, n, num_figures, scan_limit=1000):
     picks are spread across the whole dataset rather than clustered at the
     start, and the scan continues across batches so successive figures draw
     from different samples."""
-    stride = max(1, scan_limit // (num_figures * n))
+    def _ids(d):
+        ids = set()
+        for p in glob.glob(os.path.join(d, "*.pth")):
+            stem = os.path.splitext(os.path.basename(p))[0]
+            if stem.isdigit():
+                ids.add(int(stem))
+        return ids
+
+    # Enumerate the sample ids actually present in *both* runs. The ids are not
+    # a contiguous 0..N range (the stratified BoxCars selection scatters them
+    # across the full test set), so we must read the filenames rather than
+    # assume range(scan_limit).
+    avail = sorted(_ids(baseline_dir) & _ids(concept_dir))
+    if scan_limit:
+        avail = avail[:scan_limit]
+
+    # strided order over the available ids so the picks spread across the set.
+    stride = max(1, len(avail) // (num_figures * n)) if avail else 1
     order = []
     for off in range(stride):
-        order.extend(range(off, scan_limit, stride))
+        order.extend(avail[off::stride])
 
     batches, pos = [], 0
     for _ in range(num_figures):
@@ -73,12 +91,10 @@ def select_batches(baseline_dir, concept_dir, n, num_figures, scan_limit=1000):
             uidx = order[pos]
             pos += 1
             cpath = os.path.join(concept_dir, f"{str(uidx).zfill(5)}.pth")
-            bpath = os.path.join(baseline_dir, f"{str(uidx).zfill(5)}.pth")
-            if os.path.isfile(cpath) and os.path.isfile(bpath):
-                src = torch.load(cpath, map_location="cpu")["source"]
-                if src not in seen:
-                    seen.add(src)
-                    chosen.append(uidx)
+            src = torch.load(cpath, map_location="cpu")["source"]
+            if src not in seen:
+                seen.add(src)
+                chosen.append(uidx)
         if chosen:
             batches.append(sorted(chosen))
     return batches

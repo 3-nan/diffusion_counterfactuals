@@ -503,11 +503,29 @@ def plot_example(cfg, classifier_model, device, fv, composite, concept_layer, i2
     # the montage box height is derived from the montage's own aspect ratio
     # so the reference thumbnails keep their true proportions (no vertical
     # squashing), centred within an evenly spaced row slot. ---
-    mid_left, refs_w, heat_w = 0.30, 0.38, 0.055
-    gap_rl = 0.008
+    mid_left, refs_w = 0.30, 0.36
+    gap_rl = 0.015
     loc_left = mid_left + refs_w + gap_rl
     top, bottom = 0.86, 0.06
     slot = (top - bottom) / n
+
+    # Spatial-conditioning box: sized to the heatmap's own aspect ratio
+    # rather than a fixed-width box, so imshow's default 'equal' aspect
+    # (which shrinks the image to fit *inside* a mismatched box, centred,
+    # leaving whitespace on whichever side doesn't bind) has nothing to pad
+    # -- the box is exactly the image's shape, just scaled up. Every row
+    # shares the same crop (rows/cols is computed once from orig_full), so
+    # one aspect ratio -- taken from the first panel -- fits them all. Sized
+    # to fill most of the row slot vertically, then capped by whatever
+    # horizontal room is actually left before the counterfactual column.
+    a_h = panels[0][3].shape[1] / panels[0][3].shape[0]  # heatmap width/height
+    avail_w = 0.78 - loc_left - 0.01
+    heat_h = slot * 0.92
+    heat_w = heat_h * fig_h * a_h / fig_w
+    if heat_w > avail_w:
+        heat_w = avail_w
+        heat_h = heat_w * fig_w / a_h / fig_h
+
     centers = []
     for i, (concept, diff, thumb, heat) in enumerate(panels):
         a_m = thumb.shape[1] / thumb.shape[0]
@@ -522,8 +540,8 @@ def plot_example(cfg, classifier_model, device, fv, composite, concept_layer, i2
         ax_r.imshow(thumb, aspect="auto")  # box matches montage aspect -> undistorted
         ax_r.set_title(f"{sign} Concept {concept}   \u0394={diff:.2f}", loc="left", fontsize=16, color=color)
         _bare(ax_r)
-        ax_h = fig.add_axes([loc_left, y0, heat_w, h_m])
-        ax_h.imshow(heat)  # default (equal) aspect -> not vertically squashed
+        ax_h = fig.add_axes([loc_left, yc - heat_h / 2, heat_w, heat_h])
+        ax_h.imshow(heat)  # box matches the heatmap's aspect -> fills it exactly, no whitespace
         _bare(ax_h)
 
     # --- column headers ---
@@ -532,7 +550,7 @@ def plot_example(cfg, classifier_model, device, fv, composite, concept_layer, i2
              ha="center", va="center", fontsize=16)
     fig.text(mid_left + refs_w / 2, 0.93, "Concept Visualization",
              ha="center", va="center", fontsize=16)
-    fig.text(loc_left + heat_w / 2 - 0.035, 0.93, "Spatial Conditioning",
+    fig.text(loc_left + heat_w / 2, 0.93, "Spatial Conditioning",
              ha="center", va="center", fontsize=16)
 
     # --- arrows: original -> each concept, coloured green/red by the sign of

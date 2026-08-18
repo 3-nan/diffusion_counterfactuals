@@ -478,6 +478,60 @@ def _paired_distance_stats(emb_real, emb_gen, n_boot, alpha, seed):
     }
 
 
+def _channel_change_sparsity(emb_real, emb_gen, n_boot, alpha, seed, taus=(1.0, 2.0)):
+    """How *many* channels an intervention moves, rather than by how much.
+
+    Complements the L2/cosine distance (which measures overall displacement) by
+    quantifying the sparsity of the per-channel change: if only a handful of
+    concept-layer channels move, the edit engaged few concepts; if the change is
+    spread over many channels, it engaged many. Each channel's change is first
+    standardised by its robust spread (MAD over the originals) so the count is
+    scale-free and comparable across channels:
+
+        z_{i,c} = (a^cf_{i,c} - a^orig_{i,c}) / sigma_c ,   sigma_c = 1.4826 * MAD_i(a^orig_{.,c})
+
+    and summarised three ways per sample (each averaged over samples with a
+    percentile bootstrap CI):
+
+      * ``n_eff``  -- effective number of changed channels, the participation
+        ratio ``||z||_1^2 / ||z||_2^2`` (1 = all change in one channel, C =
+        spread evenly over every channel); threshold-free.
+      * ``hoyer``  -- Hoyer sparsity in [0, 1] (1 = maximally sparse / one channel).
+      * ``l0_tau*``-- literal count of channels moved by more than ``tau`` robust SDs.
+
+    Lower ``n_eff`` / ``l0`` and higher ``hoyer`` mean the counterfactual changed
+    fewer concepts.
+    """
+    diff = emb_gen - emb_real
+    # Robust per-channel scale from the originals: ReLU activations are
+    # nonnegative and heavy-tailed, so MAD is steadier than std. Fall back to
+    # std, then to 1, for dead/constant channels.
+    med = np.median(emb_real, axis=0)
+    mad = np.median(np.abs(emb_real - med), axis=0) * 1.4826
+    scale = np.where(mad > 1e-12, mad, emb_real.std(axis=0))
+    scale = np.where(scale > 1e-12, scale, 1.0)
+    z = diff / scale  # [N, C]
+
+    absz = np.abs(z)
+    l1 = absz.sum(axis=1)
+    sq = (z * z).sum(axis=1)
+    l2 = np.sqrt(sq)
+    n_eff = (l1 * l1) / np.clip(sq, 1e-12, None)
+    C = z.shape[1]
+    hoyer = (np.sqrt(C) - l1 / np.clip(l2, 1e-12, None)) / (np.sqrt(C) - 1.0)
+
+    out = {"dim": int(C)}
+    for name, vals in (("n_eff", n_eff), ("hoyer", hoyer)):
+        m, lo, hi = bootstrap_ci(vals, n_boot=n_boot, alpha=alpha, seed=seed)
+        out[name], out[f"{name}_ci_lo"], out[f"{name}_ci_hi"] = m, lo, hi
+    for tau in taus:
+        k = (absz > tau).sum(axis=1).astype(np.float64)
+        m, lo, hi = bootstrap_ci(k, n_boot=n_boot, alpha=alpha, seed=seed)
+        key = f"l0_tau{tau:g}"
+        out[key], out[f"{key}_ci_lo"], out[f"{key}_ci_hi"] = m, lo, hi
+    return out
+
+
 def embedding_distance_with_ci(output_path, n_boot=10000, alpha=0.05, seed=0,
                                batch_size=50, device=None, concept_layer_override=None):
     """Distance between each original and its counterfactual in the run's own
@@ -533,6 +587,8 @@ def embedding_distance_with_ci(output_path, n_boot=10000, alpha=0.05, seed=0,
     }
     if concept_layer is not None:
         result["concept"] = _paired_distance_stats(
+            emb_real["concept"], emb_gen["concept"], n_boot, alpha, seed)
+        result["concept"]["channel_change"] = _channel_change_sparsity(
             emb_real["concept"], emb_gen["concept"], n_boot, alpha, seed)
     return result
 
@@ -690,6 +746,13 @@ def _cmd_embed(args):
         print(f"concept_layer {result['concept_layer']} (dim {con['dim']}):")
         print("  L2      :", _fmt_ci(con["l2"], con["l2_ci_lo"], con["l2_ci_hi"]))
         print("  cosine  :", _fmt_ci(con["cosine"], con["cosine_ci_lo"], con["cosine_ci_hi"]))
+        cc = con.get("channel_change")
+        if cc:
+            print(f"  channel change (of {cc['dim']} channels):")
+            print("    n_eff   :", _fmt_ci(cc["n_eff"], cc["n_eff_ci_lo"], cc["n_eff_ci_hi"]))
+            print("    hoyer   :", _fmt_ci(cc["hoyer"], cc["hoyer_ci_lo"], cc["hoyer_ci_hi"]))
+            print("    L0 >1sd :", _fmt_ci(cc["l0_tau1"], cc["l0_tau1_ci_lo"], cc["l0_tau1_ci_hi"]))
+            print("    L0 >2sd :", _fmt_ci(cc["l0_tau2"], cc["l0_tau2_ci_lo"], cc["l0_tau2_ci_hi"]))
     else:
         print("concept_layer: (none in config -- skipped)")
     if args.export_dir:
