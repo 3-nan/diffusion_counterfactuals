@@ -33,13 +33,6 @@ docker run --gpus all -it dce python run_concept_ldce.py --config=configs/ldce/v
  
 Dockerfiles are provided for training, CLIP and diffusers environments.
  
-## Results
-<!-- One small table beats a paragraph. Example columns: method | validity | proximity / LPIPS | edit area | FID -->
-| Method | _[metric 1]_ | _[metric 2]_ | _[metric 3]_ |
-|---|---|---|---|
-| LDCE (baseline) | | | |
-| Concept-localized (ours) | | | |
- 
 ## Citation
 If you use this code, please cite:
 ```bibtex
